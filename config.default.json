@@ -19,6 +19,10 @@
       "keyVar": "OPENFERENCE_API_KEY",
       "baseUrlVar": "OPENFERENCE_BASE_URL",
       "modelsPath": "/v1/models",
+      "creditBalanceModels": [
+        "Kimi K2.6"
+      ],
+      "_creditBalanceModelsNote": "Known models that require a separate provider credit balance. Pworker excludes these from automatic tier suggestions and returns an actionable error before sending a request.",
       "formats": {
         "openai": "/v1/chat/completions",
         "anthropic": "/v1/messages"
@@ -72,7 +76,8 @@
       "baseUrl": "https://openrouter.ai/api",
       "envFile": "openrouter.env",
       "keyVar": "OPENROUTER_API_KEY",
-      "modelsPath": "/v1/models",
+      "modelsPath": "/v1/models?sort=most-popular&limit=60",
+      "_modelsNote": "Pworker requests the current top 60 popular OpenRouter models, rather than the whole catalog. The interactive picker can then sort that live list by published price or creation date.",
       "formats": {
         "openai": "/v1/chat/completions"
       },
@@ -270,7 +275,7 @@
     }
   },
   "tiers": {
-    "_note": "Clients request a tier rather than a concrete model. Each tier is an ordered provider/model chain. Providers without keys are skipped; local models can serve when configured.",
+    "_note": "Clients request a tier rather than a concrete model. Remote models are selected from each provider's live catalog in pworker; no remote model ID is pinned here. Each tier is an ordered provider/model chain. Providers without keys are skipped; local models can serve when configured.",
     "maxWaitMs": 120000,
     "nano": [
       {
@@ -289,87 +294,10 @@
       }
     ],
     "supertiny": "micro",
-    "tiny": [
-      {
-        "upstream": "openference",
-        "model": "DeepSeek-V4-Flash-0731"
-      },
-      {
-        "upstream": "openrouter",
-        "model": "deepseek/deepseek-v4-flash",
-        "extraBody": {
-          "reasoning": {
-            "enabled": false
-          }
-        }
-      },
-      {
-        "upstream": "local",
-        "model": "Qwen3.6-35B-A3B"
-      }
-    ],
-    "small": [
-      {
-        "upstream": "openference",
-        "model": "Qwen3.8 27b"
-      },
-      {
-        "upstream": "openference",
-        "model": "DeepSeek-V4-Flash-0731"
-      },
-      {
-        "upstream": "openrouter",
-        "model": "deepseek/deepseek-v4-flash",
-        "extraBody": {
-          "reasoning": {
-            "enabled": false
-          }
-        }
-      },
-      {
-        "upstream": "local",
-        "model": "Qwen3.6-35B-A3B"
-      }
-    ],
-    "medium": [
-      {
-        "upstream": "openference",
-        "model": "DeepSeek-V4-Flash-0731"
-      },
-      {
-        "upstream": "openrouter",
-        "model": "deepseek/deepseek-v4-flash",
-        "extraBody": {
-          "reasoning": {
-            "enabled": false
-          }
-        }
-      },
-      {
-        "upstream": "local",
-        "model": "Qwen3.6-35B-A3B"
-      }
-    ],
-    "good": [
-      {
-        "upstream": "openference",
-        "model": "DeepSeek-V4-Flash-0731",
-        "timeoutMs": 290000
-      },
-      {
-        "upstream": "openrouter",
-        "model": "deepseek/deepseek-v4.1-flash",
-        "extraBody": {
-          "reasoning": {
-            "enabled": false
-          }
-        }
-      },
-      {
-        "upstream": "local",
-        "model": "Qwen3.6-35B-A3B"
-      }
-    ],
+    "tiny": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
+    "small": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
+    "medium": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
+    "good": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
     "best": [
       {
         "upstream": "local",
@@ -377,14 +305,7 @@
       }
     ]
   },
-  "fallback": {
-    "from": "openference",
-    "upstream": "openrouter",
-    "models": {
-      "Qwen3.8 27b": "deepseek/deepseek-v4-flash"
-    },
-    "maxWaitMs": 120000
-  },
+  "fallback": null,
   "audit": {
     "enabled": true,
     "tiers": [

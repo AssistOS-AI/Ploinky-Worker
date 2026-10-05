@@ -14,7 +14,7 @@ function listen(server) {
 }
 const body = (req) => new Promise((res) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => res(Buffer.concat(c).toString())); });
 
-async function setup({ stub, limits = { maxConcurrent: 2, maxPerSecond: 50 }, token = null, plan = null, compare = undefined, dataDir: reuseDir = null, up: reuseUp = null } = {}) {
+async function setup({ stub, limits = { maxConcurrent: 2, maxPerSecond: 50 }, token = null, plan = null, compare = undefined, creditBalanceModels = [], dataDir: reuseDir = null, up: reuseUp = null } = {}) {
   const seen = [];
   const up = http.createServer(async (req, res) => {
     const b = await body(req);
@@ -24,7 +24,7 @@ async function setup({ stub, limits = { maxConcurrent: 2, maxPerSecond: 50 }, to
   });
   const uport = await listen(up);
   const dataDir = reuseDir || mkdtempSync(join(tmpdir(), 'pworker-'));
-  const config = { defaultUpstream: 'stub', modelsCacheSeconds: 600, compare, upstreams: { stub: { plan, baseUrl: `http://127.0.0.1:${uport}`, keyVar: 'STUB_KEY', limits, retry: { max: 3, baseMs: 20, maxWaitMs: 2000 }, formats: { openai: '/v1/chat/completions', anthropic: '/v1/messages' } } } };
+  const config = { defaultUpstream: 'stub', modelsCacheSeconds: 600, compare, upstreams: { stub: { plan, creditBalanceModels, baseUrl: `http://127.0.0.1:${uport}`, keyVar: 'STUB_KEY', limits, retry: { max: 3, baseMs: 20, maxWaitMs: 2000 }, formats: { openai: '/v1/chat/completions', anthropic: '/v1/messages' } } } };
   const p = createProxy({ config, env: { STUB_KEY: KEY }, dataDir, proxyToken: token, cacheDir: dataDir + '-cache' });
   const port = await listen(p.server);
   const base = `http://127.0.0.1:${port}`;
@@ -199,6 +199,18 @@ test('quota headers, per-minute limit, credit-billed model marking and quota win
     assert.equal(s.quota.resets.length, 1);
     const models = await (await fetch(t.base + '/v1/models')).json();
     assert.equal(models.data[0].x_billing, 'plan_or_unknown');
+  } finally { await t.close(); }
+});
+
+test('known credit-balance models are labeled and refused before an upstream request', async () => {
+  const t = await setup({ creditBalanceModels: ['paid'], stub: (req, res) => json(res, 200, { usage: {} }) });
+  try {
+    const models = await (await fetch(t.base + '/v1/models')).json();
+    assert.equal(models.data[0].x_billing, 'plan_or_unknown');
+    const r = await fetch(t.base + '/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'paid', messages: [] }) });
+    assert.equal(r.status, 402);
+    assert.equal((await r.json()).error.type, 'credit_balance_required');
+    assert.equal(t.seen.filter((call) => call.url === '/v1/chat/completions').length, 0);
   } finally { await t.close(); }
 });
 

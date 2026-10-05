@@ -35,8 +35,8 @@
     </section>
     <section id="tiers">
       <h2>Tiers choose models</h2>
-      <p>The task says <code>tiny</code>, not a provider-specific model ID. In configuration, that tier points to a provider and model. Available tiers include <code>nano</code>, <code>micro</code>, <code>tiny</code>, <code>small</code>, <code>medium</code>, <code>good</code>, and <code>best</code>, with <code>supertiny</code> as an alias. A tier can also have fallback entries.</p>
-      <p>Connect a provider in the interactive CLI first. Then choose a tier and select a model from the provider's live model catalog. A configured local model or an OpenAI-compatible endpoint can be a provider too.</p>
+      <p>The task says <code>tiny</code>, not a provider-specific model ID. In configuration, that tier points to an ordered provider/model chain. Available tiers include <code>nano</code>, <code>micro</code>, <code>tiny</code>, <code>small</code>, <code>medium</code>, <code>good</code>, and <code>best</code>, with <code>supertiny</code> as an alias. The first chain entry is primary and later entries are fallbacks, so one tier can mix providers.</p>
+      <p>Connect a provider in the interactive CLI first. Then choose a tier and select its primary model directly from one searchable list of usable text models across connected providers. The picker shows the provider, published input/output pricing, and plan request cost where available. A model already known to require a separate credit balance is excluded, as is a model that does not return text. A configured local model or an OpenAI-compatible endpoint can be a provider too.</p>
     </section>
     <section id="text">
       <h2>Start from a request or a file</h2>

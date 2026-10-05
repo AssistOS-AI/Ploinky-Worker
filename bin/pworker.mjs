@@ -10,8 +10,8 @@ import { ensureUserHome, loadLayers } from '../lib/config.mjs';
 import { pworkerHome } from '../lib/settings.mjs';
 import { Pworker } from '../lib/pworker/task.mjs';
 import { jobStore } from '../lib/pworker/jobs.mjs';
-import { selectMenu, promptField } from '../lib/pworker/menu.mjs';
-import { connectedProviders, fetchModelCatalog, providerSpec } from '../lib/pworker/providers.mjs';
+import { selectMenu, promptChat, promptField } from '../lib/pworker/menu.mjs';
+import { connectedProviders, fetchModelCatalog, formatModelLabel, isModelEligibleForTier, modelExclusionReason, normalizeModelCatalog, providerSpec, sortModelCatalog } from '../lib/pworker/providers.mjs';
 import { resolveUpstream } from '../lib/settings.mjs';
 import { HELP } from '../lib/pworker/help.mjs';
 
@@ -110,10 +110,10 @@ function saveProvider(name, spec, key) {
   saveUserConfig(c);
   if (key) fs.writeFileSync(path.join(home, 'keys', spec.envFile ?? `${name}.env`), `${spec.keyVar}=${JSON.stringify(key)}\n`, { mode: 0o600 });
 }
-function setTier(tier, provider, model, batch) {
+function setTier(tier, entries, batch) {
   const c = readUserConfig();
   c.tiers ??= {};
-  c.tiers[tier] = [{ upstream: provider, model }];
+  c.tiers[tier] = entries.map(({ provider, model }) => ({ upstream: provider, model }));
   c.batching ??= {};
   if (batch !== undefined) c.batching[tier] = { enabled: batch };
   saveUserConfig(c);
@@ -128,9 +128,23 @@ async function localStates() {
 
 async function modelsFromProxy(provider) {
   const response = await client().providerModels(provider);
-  const models = [...new Set((response.data ?? []).map((item) => item?.id).filter((id) => typeof id === 'string' && id))].sort();
+  const spec = loadLayers().config.providers?.[provider] ?? {};
+  const models = normalizeModelCatalog(provider, spec, response.data ?? []);
   if (!models.length) throw new Error(`${provider} returned no selectable models`);
   return models;
+}
+
+const tierEntries = (config, tier) => Array.isArray(config.tiers?.[tier]) ? config.tiers[tier].map((entry) => ({ provider: entry.upstream, model: entry.model })) : [];
+const chainSummary = (entries) => entries.map((entry, index) => `${index + 1}. ${entry.provider}/${entry.model}`).join('\n');
+
+async function tierModelChoices(available, preferred = null) {
+  const providers = preferred && available.includes(preferred) ? [preferred, ...available.filter((name) => name !== preferred)] : available;
+  const catalogues = await Promise.all(providers.map(async (provider) => {
+    try { return { provider, models: await modelsFromProxy(provider) }; }
+    catch (error) { return { provider, models: [], error }; }
+  }));
+  const choices = catalogues.flatMap(({ models }) => sortModelCatalog(models, 'recommended').filter(isModelEligibleForTier));
+  return { choices, catalogues, unavailable: catalogues.filter(({ error }) => error).map(({ provider, error }) => `${provider}: ${error.message}`) };
 }
 
 async function connectProvider(screen) {
@@ -204,32 +218,83 @@ async function configureTier(screen, preferred = null) {
   const local = await localStates();
   const available = connectedProviders(config, local);
   if (!available.length) { note('Connect an API provider or start a local model before configuring a tier.'); return; }
-  const names = Object.keys(config.tiers ?? {}).filter((name) => !name.startsWith('_') && name !== 'maxWaitMs');
+  const names = Object.entries(config.tiers ?? {}).filter(([name, value]) => !name.startsWith('_') && name !== 'maxWaitMs' && Array.isArray(value)).map(([name]) => name);
   const tier = await selectMenu(screen, 'Choose a tier', names.map((name) => {
-    const first = Array.isArray(config.tiers[name]) ? config.tiers[name][0] : null;
-    return { label: `${name}${first ? ` · ${first.upstream}/${first.model}` : ''}`, value: name };
+    const entries = tierEntries(config, name);
+    return { label: `${name}${entries.length ? ` · ${entries.length} model${entries.length === 1 ? '' : 's'} · ${entries[0].provider}/${entries[0].model}` : ' · not configured'}`, value: name };
   }));
   if (!tier) return;
-  const provider = preferred && available.includes(preferred) ? preferred : await selectMenu(screen, `Provider for ${tier}`, available.map((name) => ({ label: name, value: name })));
-  if (!provider) return;
-  let models;
-  try { note(`Loading models from ${provider}...`); models = await modelsFromProxy(provider); }
-  catch (error) { note(`Model list unavailable: ${error.message}`); return; }
-  const model = await selectMenu(screen, `Model for ${tier} · ${provider}`, models.map((id) => ({ label: id, value: id })), { searchable: true });
-  if (!model) return;
-  const currentBatch = config.batching?.[tier]?.enabled === true;
-  const batch = await selectMenu(screen, `Batch requests for ${tier}? (currently ${currentBatch ? 'on' : 'off'})`, [
-    { label: 'Keep current setting', value: 'keep' },
-    { label: 'Enable batching', value: 'on' },
-    { label: 'Disable batching', value: 'off' },
-  ]);
-  if (!batch) return;
-  const enabled = batch === 'keep' ? currentBatch : batch === 'on';
-  const confirmation = await selectMenu(screen, `Save ${tier} → ${provider}/${model} · batching ${enabled ? 'on' : 'off'}?`, [{ label: 'Save tier', value: 'save' }]);
+  note('Loading the usable text models from connected providers...');
+  const { choices, catalogues, unavailable } = await tierModelChoices(available, preferred);
+  if (unavailable.length) note(`Catalog unavailable: ${unavailable.join('; ')}`);
+  if (!choices.length) { note('No connected provider returned a usable text model.'); return; }
+  const current = tierEntries(config, tier);
+  const selected = await selectMenu(screen, `Choose the primary model for ${tier} · ${choices.length} available\nSelected model becomes primary; existing usable models remain fallbacks.`, choices.map((model) => ({ label: formatModelLabel(model), value: model })), { searchable: true });
+  if (!selected) return;
+  const known = new Map(catalogues.flatMap(({ models }) => models).map((model) => [`${model.provider}\u0000${model.id}`, model]));
+  const dropped = current.filter((entry) => {
+    const model = known.get(`${entry.provider}\u0000${entry.model}`);
+    return model && !isModelEligibleForTier(model);
+  });
+  const entries = [{ provider: selected.provider, model: selected.id }, ...current.filter((entry) => entry.provider !== selected.provider || entry.model !== selected.id).filter((entry) => !dropped.includes(entry))];
+  if (dropped.length) note(`Removed unavailable fallback${dropped.length === 1 ? '' : 's'}: ${dropped.map((entry) => `${entry.provider}/${entry.model}`).join(', ')}`);
+  note(`${tier} priority order:\n${chainSummary(entries)}`);
+  const confirmation = await selectMenu(screen, `Save ${tier}?`, [{ label: 'Save this tier mapping', value: 'save' }]);
   if (confirmation !== 'save') return;
-  setTier(tier, provider, model, enabled);
+  setTier(tier, entries);
   await restartProxy();
-  note(`Saved ${tier} → ${provider}/${model}.`);
+  note(`Saved ${tier} with ${entries.length} model${entries.length === 1 ? '' : 's'} in priority order.`);
+}
+
+async function configurePriceLadder(screen) {
+  const config = loadLayers().config;
+  const available = connectedProviders(config, await localStates());
+  if (!available.length) { note('Connect an API provider or start a local model before creating a price ladder.'); return; }
+  note('Loading live catalogs and their published prices...');
+  const catalogues = new Map(await Promise.all(available.map(async (provider) => {
+    try { return [provider, await modelsFromProxy(provider)]; } catch { return [provider, []]; }
+  })));
+  const sources = [...catalogues].map(([provider, models]) => {
+    const eligible = models.filter(isModelEligibleForTier);
+    const priced = eligible.filter((model) => model.prices.input != null || model.prices.output != null).length;
+    const excluded = models.length - eligible.length;
+    return { provider, models: eligible, priced, excluded };
+  }).filter(({ models }) => models.length);
+  if (!sources.length) { note('No connected provider returned a selectable model catalog.'); return; }
+  const source = await selectMenu(screen, 'Choose the provider used for the suggested price ladder', [
+    { label: 'Keep current tiers · do not change anything', value: 'scope:cancel' },
+    ...sources.map(({ provider, models, priced, excluded }) => ({ label: `${provider} · ${models.length} usable text models · ${priced} with published prices${excluded ? ` · ${excluded} excluded` : ''}`, value: `provider:${provider}` })),
+    ...(sources.length > 1 ? [{ label: `Mix all ${sources.length} providers by published price`, value: 'scope:all' }] : []),
+  ]);
+  if (!source || source === 'scope:cancel') return;
+  const provider = source.startsWith('provider:') ? source.slice('provider:'.length) : null;
+  const candidates = source === 'scope:all' ? sources.flatMap(({ models }) => models) : catalogues.get(provider) ?? [];
+  const priced = candidates.filter((model) => model.prices.input != null || model.prices.output != null);
+  if (!priced.length) { note(`${provider} did not publish token prices. Select models manually or add modelPricing in the user configuration.`); return; }
+  const ranked = sortModelCatalog(priced, 'lowest-price');
+  const tiers = Object.entries(config.tiers ?? {}).filter(([name, value]) => !name.startsWith('_') && name !== 'maxWaitMs' && Array.isArray(value)).map(([name]) => name);
+  const proposal = tiers.map((tier, index) => {
+    const model = ranked[Math.round(index * (ranked.length - 1) / Math.max(1, tiers.length - 1))];
+    return { tier, provider: model.provider, model: model.id, label: formatModelLabel(model) };
+  });
+  const sourceLabel = source === 'scope:all' ? 'all selected providers' : provider;
+  note(`Suggested price ladder from ${sourceLabel}, based on usable text models with live published prices. Models known to require a credit balance are excluded.\n${proposal.map((entry) => `${entry.tier} → ${entry.label}`).join('\n')}`);
+  const review = await selectMenu(screen, 'Review complete. Continue to the final save confirmation?', [
+    { label: 'Keep current tiers · do not apply this proposal', value: 'cancel' },
+    { label: 'Continue to final confirmation', value: 'continue' },
+  ]);
+  if (review !== 'continue') return;
+  const confirm = await selectMenu(screen, `Apply this ${sourceLabel} price ladder to all tiers?`, [
+    { label: 'Keep current tiers · cancel', value: 'cancel' },
+    { label: 'Apply the proposed tier mappings', value: 'save' },
+  ]);
+  if (confirm !== 'save') return;
+  const user = readUserConfig();
+  user.tiers ??= {};
+  for (const entry of proposal) user.tiers[entry.tier] = [{ upstream: entry.provider, model: entry.model }];
+  saveUserConfig(user);
+  await restartProxy();
+  note('Saved the suggested price ladder. You can add provider/model fallbacks to every tier afterwards.');
 }
 
 async function manageLocalModels(screen) {
@@ -246,17 +311,80 @@ async function manageLocalModels(screen) {
   note(`${name}: ${action} completed.`);
 }
 
-async function interactive() {
+function taskLabel(job) {
+  const phase = job.phase ? ` · phase ${job.phase}` : '';
+  const steps = job.steps ? ` · ${job.steps} step${job.steps === 1 ? '' : 's'}` : '';
+  const outcome = job.status === 'completed' ? ' · result ready' : job.status === 'failed' ? ' · failed' : '';
+  return `${job.status.toUpperCase()} · ${job.id.slice(0, 8)}${phase}${steps}${outcome}`;
+}
+
+function taskRecord(job) {
+  const rendered = JSON.stringify(publicJob(job), null, 2);
+  return rendered.length > 12_000 ? `${rendered.slice(0, 12_000)}\n… task record truncated in this view` : rendered;
+}
+
+async function inspectTask(screen, id) {
+  const store = jobStore(home);
+  for (;;) {
+    const job = store.view(id);
+    if (!job) { note(`Task ${id} no longer exists.`); return; }
+    const action = await selectMenu(screen, `Task ${id.slice(0, 8)} · ${job.status}${job.phase ? ` · phase ${job.phase}` : ''}`, [
+      { label: 'Show result, status, and task state', value: 'show' },
+      { label: 'Refresh status', value: 'refresh' },
+    ]);
+    if (!action) return;
+    if (action === 'refresh') continue;
+    await selectMenu(screen, `Task record\n\n${taskRecord(job)}`, [{ label: 'Back to task', value: 'back' }]);
+  }
+}
+
+async function composeTasks(screen, currentWorkingDirectory) {
+  const transcript = [{ role: 'pworker', text: `New tasks run in the background in ${currentWorkingDirectory}. Write a request and press Enter. The request is also the task's initial input.` }];
+  for (;;) {
+    const task = await promptChat(screen, 'New task conversation', transcript);
+    if (task == null) return;
+    const request = task.endsWith('.mjs') && !path.isAbsolute(task) ? path.resolve(currentWorkingDirectory, task) : task;
+    try {
+      const input = request.endsWith('.mjs') ? '' : task;
+      const job = startDetachedTasks([{ request, input, currentWorkingDirectory }])[0];
+      transcript.push({ role: 'user', text: task });
+      transcript.push({ role: 'pworker', text: `Task ${job.id.slice(0, 8)} started (${job.status}). Add another request or press Esc to return. Open Current tasks to monitor phases and results.` });
+    } catch (error) {
+      transcript.push({ role: 'user', text: task });
+      transcript.push({ role: 'pworker', text: `Could not start the task: ${error.message}` });
+    }
+  }
+}
+
+async function currentTasks(screen, currentWorkingDirectory) {
+  const store = jobStore(home);
+  for (;;) {
+    const jobs = store.list();
+    const visible = jobs.slice(0, 10);
+    const active = jobs.filter((job) => ['queued', 'compiling', 'running'].includes(job.status)).length;
+    const selected = await selectMenu(screen, `Current tasks · ${active} active · newest ${visible.length}/${jobs.length}\nWorking directory: ${currentWorkingDirectory}`, [
+      { label: 'Refresh task list', value: 'refresh' },
+      ...visible.map((job) => ({ label: taskLabel(job), value: `task:${job.id}` })),
+    ], { searchable: visible.length > 6 });
+    if (!selected) return;
+    if (selected === 'refresh') continue;
+    await inspectTask(screen, selected.slice('task:'.length));
+  }
+}
+
+async function interactive(currentWorkingDirectory) {
   await startProxy();
   const rl = !stdin.isTTY || !stdout.isTTY ? readline.createInterface({ input: stdin, output: stdout }) : null;
   const screen = ui(rl);
   try {
     for (;;) {
       const available = connectedProviders(loadLayers().config, await localStates());
-      const choice = await selectMenu(screen, `Ploinky Workers · ${available.length} connected provider${available.length === 1 ? '' : 's'}`, [
+      const choice = await selectMenu(screen, `Ploinky Workers · ${available.length} connected provider${available.length === 1 ? '' : 's'}\nWork folder: ${currentWorkingDirectory}`, [
         { label: 'Log in / connect provider', value: 'connect' },
         ...(available.length ? [{ label: 'Configure tier', value: 'tier' }] : []),
-        { label: 'Run task', value: 'run' },
+        ...(available.length ? [{ label: 'Auto-configure price ladder', value: 'ladder' }] : []),
+        { label: 'New task conversation', value: 'compose' },
+        { label: 'Current tasks', value: 'tasks' },
         { label: 'Manage local models', value: 'local' },
         { label: 'Statistics', value: 'stats' },
         { label: 'Stop proxy', value: 'stop' },
@@ -272,20 +400,10 @@ async function interactive() {
           continue;
         }
         if (choice === 'tier') { await configureTier(screen); continue; }
+        if (choice === 'ladder') { await configurePriceLadder(screen); continue; }
         if (choice === 'local') { await manageLocalModels(screen); continue; }
-        if (choice === 'run') {
-          const task = await promptField(screen, '.mjs file or natural-language request');
-          if (task == null) continue;
-          const inputText = await promptField(screen, 'Input (text or JSON)', { allowEmpty: true });
-          if (inputText == null) continue;
-          const cwd = await promptField(screen, 'Working directory (empty for none)', { allowEmpty: true });
-          if (cwd == null) continue;
-          const mode = await selectMenu(screen, 'Execution mode', [{ label: 'Wait for result', value: 'wait' }, { label: 'Return task ID immediately', value: 'async' }]);
-          if (!mode) continue;
-          let value = inputText; try { value = JSON.parse(inputText); } catch { /* plain text */ }
-          if (mode === 'async') json(startDetachedTasks([{ request: task, input: value, currentWorkingDirectory: cwd || null }])[0]);
-          else { const worker = new Pworker({ client: client(), config: loadLayers().config }); await worker.enqueueRequest(task, value, { currentWorkingDirectory: cwd || null }); json(await worker.flush()); }
-        }
+        if (choice === 'compose') { await composeTasks(screen, currentWorkingDirectory); continue; }
+        if (choice === 'tasks') { await currentTasks(screen, currentWorkingDirectory); continue; }
       } catch (error) { note(`Operation failed: ${error.message}`); }
     }
   } finally { rl?.close(); }
@@ -294,7 +412,13 @@ async function interactive() {
 async function main() {
   if (command === 'help' || args.includes('--help') || args.includes('-h')) { process.stdout.write(HELP); return; }
   ensureUserHome();
-  if (!command) return interactive();
+  if (!command) return interactive(fs.realpathSync(process.cwd()));
+  if (command === '--cwd' && args.length === 2) {
+    const folder = path.resolve(args[1]);
+    if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new Error(`Working directory does not exist: ${folder}`);
+    return interactive(fs.realpathSync(folder));
+  }
+  if (args.length === 1 && fs.existsSync(command) && fs.statSync(command).isDirectory()) return interactive(fs.realpathSync(command));
   if (command === '_execute-batch') return executeDetachedBatch(args[1]);
   if (command === '--status' || command === 'status') {
     const store = jobStore(home);
@@ -329,9 +453,14 @@ async function main() {
     const name = option('provider'), model = option('model');
     const available = connectedProviders(loadLayers().config, await localStates());
     if (!available.includes(name)) throw new Error('Connect the provider before configuring a tier');
-    if (!(await modelsFromProxy(name)).includes(model)) throw new Error(`Model ${model} is not in the provider model list`);
-    setTier(args[1], name, model, args.includes('--batch') ? true : undefined); await restartProxy();
-    json({ tier: args[1], provider: name, model }); return;
+    const selected = (await modelsFromProxy(name)).find((entry) => entry.id === model);
+    if (!isModelEligibleForTier(selected)) throw new Error(`Model ${model} cannot serve a text tier: ${modelExclusionReason(selected)}`);
+    const config = loadLayers().config;
+    const existing = args.includes('--add') ? tierEntries(config, args[1]) : [];
+    if (existing.some((entry) => entry.provider === name && entry.model === model)) throw new Error('That provider and model are already in the tier');
+    const entries = [...existing, { provider: name, model }];
+    setTier(args[1], entries, args.includes('--batch') ? true : undefined); await restartProxy();
+    json({ tier: args[1], entries }); return;
   }
   if (command === 'queue' && ['list', 'clear'].includes(args[1])) {
     if (args[1] === 'clear') { fs.writeFileSync(queueFile, '[]\n', { mode: 0o600 }); console.log('The queue is empty.'); }

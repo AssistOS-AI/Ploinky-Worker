@@ -1,6 +1,6 @@
 # Ploinky Workers
 
-`pworker` is one CLI and library for phased tasks. Its HTTP proxy runs in a separate process and starts on first use. `pworker start` and `pworker stop` control it explicitly. Running `pworker` without arguments opens an interactive arrow-key menu.
+`pworker` is one CLI and library for phased tasks. Its HTTP proxy runs in a separate process and starts on first use. `pworker start` and `pworker stop` control it explicitly. Running `pworker` without arguments opens an interactive arrow-key menu. `pworker DIRECTORY` or `pworker --cwd DIRECTORY` opens the same menu with `DIRECTORY` as its task working directory.
 
 Node.js 22.13 or newer is required. From this directory, run `npm link` and then `pworker`. Without installation, run `node bin/pworker.mjs`.
 
@@ -8,9 +8,29 @@ The [HTML documentation](docs/index.html) has separate pages for [concepts](docs
 
 ## Configuration
 
-User data lives in `~/.pworker/` (or `PWORKER_HOME`): `config.json`, `keys/`, `tasks/`, `jobs/`, `data/`, `cache/`, and `logs/`. API keys live in `keys/<provider>.env` with mode 0600; `config.json` stores only the key variable name. The main menu's **Log in / connect provider** action accepts a built-in provider key, a custom OpenAI-compatible endpoint and optional key, or a configured local model that Pworker can start. It checks the provider's live model catalog before accepting the connection. **Configure tier** appears only after at least one provider is connected. Pick a provider and model from its live catalog; type to filter long model lists. Arrow keys move, Enter confirms, and Esc or **Back / Cancel** leaves any step. The tier mapping is saved only after its final confirmation.
+User data lives in `~/.pworker/` (or `PWORKER_HOME`): `config.json`, `keys/`, `tasks/`, `jobs/`, `data/`, `cache/`, and `logs/`. API keys live in `keys/<provider>.env` with mode 0600; `config.json` stores only the key variable name. The main menu's **Log in / connect provider** action accepts a built-in provider key, a custom OpenAI-compatible endpoint and optional key, or a configured local model that Pworker can start. It checks the provider's live model catalog before accepting the connection.
 
-The noninteractive equivalents are `pworker provider NAME --endpoint https://example.com/v1 --key KEY --rpm 60` and `pworker tier small --provider NAME --model MODEL_ID --batch`. Both validate the live model catalog before saving. Supplying `--key` on a command line may leave it in shell history; use the menu or edit the `.env` file directly when that matters.
+**Configure tier** appears only after at least one provider is connected. Choose a tier, then select its primary model directly from one searchable list of usable text models across every connected provider. Each row identifies the provider, input and output price when published, and plan request cost when reported. The selected model becomes primary; earlier usable entries remain as fallbacks, so repeated selections can build a mixed-provider chain without separate provider and model menus. Models that are known to require a separate credit balance, and models that do not produce text, are excluded. **Auto-configure price ladder** uses the same eligibility rule before proposing a price-ranked mapping. It first shows each connected provider and requires an explicit provider or all-provider choice, then shows the proposal before two save confirmations.
+
+OpenRouter requests only its live top 60 popular models, rather than its complete catalog. Its endpoint supplies current model pricing, and those models appear with the other connected-provider choices in the searchable picker. The list is therefore useful without making a terminal menu hundreds of rows long. Arrow keys move, Enter confirms, and Esc or **Back / Cancel** leaves any step. The tier mapping is saved only after its final confirmation.
+
+Some OpenAI-compatible servers return model IDs without pricing. To show price information for those models, add a `modelPricing` map to that provider in `~/.pworker/config.json`; prices are USD per million text tokens:
+
+```json
+{
+  "providers": {
+    "myapi": {
+      "modelPricing": {
+        "current-model": { "inputUsdPerM": 0.25, "outputUsdPerM": 1.00 }
+      }
+    }
+  }
+}
+```
+
+The live model list remains authoritative for selectable model IDs. Configuration only supplies the display prices when the provider does not.
+
+The noninteractive equivalents are `pworker provider NAME --endpoint https://example.com/v1 --key KEY --rpm 60`, `pworker tier small --provider NAME --model MODEL_ID --batch`, and `pworker tier small --provider backup --model BACKUP_MODEL --add`. `--add` appends a fallback; without it, the command replaces the tier's chain. Provider and tier commands validate the live model catalog before saving, reject a known credit-balance model, and reject a model that cannot return text. Supplying `--key` on a command line may leave it in shell history; use the menu or edit the `.env` file directly when that matters.
 
 The built-in providers are `openference`, `openai`, `zai`, `deepseek`, `grok`, `openrouter`, and the existing local models. The [OpenAI](https://platform.openai.com/docs/api-reference/models/object?lang=curl), [Z.AI](https://docs.z.ai/guides/capabilities/mcp-call), and [xAI](https://docs.x.ai/developers/rest-api-reference/inference) endpoints follow their official documentation. Remote providers become usable after their keys are configured. The tiers are `nano`, `micro`, `tiny`, `small`, `medium`, `good`, `best`, plus the `supertiny` alias. A tier is an ordered chain of `{upstream, model}` entries; the first available provider receives the request. Change a tier with `pworker tier small --provider openai --model MODEL_ID --batch`. The proxy enforces `providers.<name>.limits.maxPerMinute`. Use `pworker models [start|stop <name>]` to inspect or control local models; configure their GGUF files and executable in `providers`.
 
@@ -38,6 +58,8 @@ export default {
 `pworker run ./task.mjs --input 'hello'` executes a task file immediately. `pworker run 'a natural-language task' --input 'hello'` compiles and executes a text request. `pworker run - --input ...` reads the request from stdin. `this.next("phase")` selects the next phase, `this.end(value)` finishes the task, and `this.name = value` preserves a variable for subsequent phases. A final phase without `code` returns the model's answer. Execution is capped at 100 phases per task.
 
 ## Detached execution and status
+
+The interactive **New task conversation** is a text-mode composer. Each request starts immediately in the background and becomes that task's initial input, so more requests can be submitted while earlier work runs. **Current tasks** is a separate monitor: it displays the exact working directory, lists the ten newest saved tasks with their state and current phase, and lets you inspect a persisted result, state, or error. Use **Refresh task list** while a task is running.
 
 Add `--async` to return a task ID without waiting for task execution:
 

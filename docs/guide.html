@@ -18,19 +18,33 @@ pworker</code></pre></div>
     </section>
     <section id="configure">
       <h2>Connect a provider and configure a tier</h2>
-      <ol><li>Choose <strong>Log in / connect provider</strong> in the menu.</li><li>Enter a key for a built-in provider, add an OpenAI-compatible endpoint with an optional key, or start a configured local model.</li><li>After the live model catalog responds, choose <strong>Configure tier</strong>. Pick a tier, provider, and model from the searchable live list.</li><li>Review the batching setting and confirm the tier mapping.</li></ol>
-      <p>Use ↑/↓ and Enter to navigate. Esc or <strong>Back / Cancel</strong> leaves a step. Tier setup is shown only when a provider is connected. Credentials are stored after a successful connection check; a tier mapping is stored only after its final confirmation.</p>
+      <ol><li>Choose <strong>Log in / connect provider</strong> in the menu.</li><li>Enter a key for a built-in provider, add an OpenAI-compatible endpoint with an optional key, or start a configured local model.</li><li>After the live model catalog responds, choose <strong>Configure tier</strong>, choose the tier, and select its primary model from one searchable list across connected providers.</li><li>The selected model becomes primary; prior usable entries remain fallbacks.</li><li>Confirm the tier mapping.</li></ol>
+      <p>Each model row shows its provider, published input/output USD per million tokens where available, and plan request cost where reported. Use ↑/↓ and Enter to navigate. Esc or <strong>Back / Cancel</strong> leaves a step. The list excludes models known to require a separate credit balance and models that do not produce text. Tier setup is shown only when a provider is connected. Credentials are stored after a successful connection check; a tier mapping is stored only after its final confirmation.</p>
+      <p><strong>Auto-configure price ladder</strong> first lists each connected provider with its usable-text-model and published-price counts. Choose one provider for the proposal, or explicitly select the separate all-provider mixing option. It creates a reviewable proposal from cheapest to most costly and excludes models known to need a separate credit balance. The proposal then requires two explicit confirmations, both defaulting to keeping the current tiers. OpenRouter loads its current top 60 popular models, so its picker remains manageable while keeping the selection dynamic.</p>
       <p>Built-in providers include <code>openference</code>, <code>openai</code>, <code>zai</code>, <code>deepseek</code>, <code>grok</code>, and <code>openrouter</code>, alongside configured local models. The logical tiers are <code>nano</code>, <code>micro</code>, <code>tiny</code>, <code>small</code>, <code>medium</code>, <code>good</code>, and <code>best</code>; <code>supertiny</code> is an alias.</p>
       <div class="codebox"><div class="terminalhead">noninteractive configuration</div><pre><code>pworker provider myapi --endpoint https://example.com/v1 --key KEY --rpm 30
 pworker tier small --provider myapi --model MODEL_ID --batch
+pworker tier small --provider backup --model BACKUP_MODEL --add
 pworker models
 pworker models start LOCAL_NAME
 pworker models stop LOCAL_NAME</code></pre></div>
-      <p>The provider and tier commands validate the live model list. <code>--rpm</code> is the provider's maximum requests per minute. Passing <code>--key</code> on a command line may leave it in shell history; the interactive key field is masked.</p>
+      <p>The provider and tier commands validate the live model list. They reject a model known to require a credit balance and a model that cannot return text. <code>--add</code> appends a fallback to a tier; without it, <code>tier</code> replaces the chain. <code>--rpm</code> is the provider's maximum requests per minute. Passing <code>--key</code> on a command line may leave it in shell history; the interactive key field is masked.</p>
+      <p>When an OpenAI-compatible provider does not publish prices in its model catalog, add them to that provider's <code>modelPricing</code> map in <code>~/.pworker/config.json</code>. Prices use USD per million text tokens:</p>
+      <div class="codebox"><div class="terminalhead">config.json</div><pre><code>{
+  "providers": {
+    "myapi": {
+      "modelPricing": {
+        "current-model": { "inputUsdPerM": 0.25, "outputUsdPerM": 1.00 }
+      }
+    }
+  }
+}</code></pre></div>
+      <p>The live provider catalog remains the source of selectable model IDs; this map only adds display prices.</p>
     </section>
     <section id="run">
       <h2>Run and queue tasks</h2>
       <p><code>TASK</code> can be a <code>.mjs</code> file, a text request, or <code>-</code> to read a request from standard input. <code>--input</code> supplies the start-phase value. JSON objects become named task variables; other values become <code>$input</code>. A text request is compiled and cached as a task file.</p>
+      <p>In the interactive CLI, open <strong>New task conversation</strong> to submit requests in a text-mode conversation. Every request begins in the background, and the request becomes that task's initial input, so you can submit another request while earlier work runs. Open <strong>Current tasks</strong> separately to inspect the ten newest saved tasks, their status, current phase, and results. The default working directory is where <code>pworker</code> was started; use <code>pworker DIRECTORY</code> or <code>pworker --cwd DIRECTORY</code> to open the menu for a different directory.</p>
       <div class="codebox"><div class="terminalhead">commands</div><pre><code>pworker run ./task.mjs --input '{"input":"hello"}'
 pworker run 'Summarize the supplied text' --input 'Meeting notes...'
 pworker run - --input 'hello' &lt; request.txt

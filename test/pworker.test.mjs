@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Pworker, batchTemplate, compileTask, loadTask, validateTask } from '../lib/pworker/task.mjs';
 import { jobStore } from '../lib/pworker/jobs.mjs';
-import { connectedProviders, fetchModelCatalog, providerSpec } from '../lib/pworker/providers.mjs';
+import { connectedProviders, fetchModelCatalog, formatModelLabel, isModelEligibleForTier, isTextOutputModel, modelPrices, normalizeModelCatalog, providerSpec, sortModelCatalog } from '../lib/pworker/providers.mjs';
 import { HELP } from '../lib/pworker/help.mjs';
 
 const exec = promisify(execFile);
@@ -142,6 +142,32 @@ test('provider setup checks a live model catalog before a tier can use it', asyn
   assert.deepEqual(seen, { url: 'https://example.test/v1/models', auth: 'Bearer secret' });
   assert.deepEqual(connectedProviders({ providers: { sample: spec, local: { noKey: true, start: {} } } }, { local: { running: false } }, { PWORKER_SAMPLE_API_KEY: 'secret' }), ['sample']);
   assert.deepEqual(connectedProviders({ providers: { local: { noKey: true, start: {} } } }, { local: { running: true } }, {}), ['local']);
+});
+
+test('live catalog prices are normalized, displayed with providers, and sortable', () => {
+  assert.deepEqual(modelPrices({ pricing: { prompt: '0.000001', completion: '0.000002' } }), { input: 1, output: 2, cachedInput: null });
+  assert.deepEqual(modelPrices({ prompt_text_token_price: 12500, completion_text_token_price: 25000 }), { input: 1.25, output: 2.5, cachedInput: null });
+  assert.deepEqual(modelPrices({ id: 'private-model' }, { modelPricing: { 'private-model': { inputUsdPerM: 0.25, outputUsdPerM: 1 } } }), { input: 0.25, output: 1, cachedInput: null });
+  const models = normalizeModelCatalog('router', {}, [
+    { id: 'premium', pricing: { prompt: '0.00001', completion: '0.00002' } },
+    { id: 'budget', pricing: { prompt: '0.000001', completion: '0.000002' } },
+  ]);
+  assert.deepEqual(sortModelCatalog(models, 'lowest-price').map((model) => model.id), ['budget', 'premium']);
+  assert.match(formatModelLabel(models[0]), /^router · premium · in \$10\.00\/M · out \$20\.00\/M$/);
+});
+
+test('credit-billed and non-text models cannot enter automatic text tiers', () => {
+  const models = normalizeModelCatalog('openference', {}, [
+    { id: 'plan-text', quota_multiplier: 2, pricing: { prompt: '0.000001', completion: '0.000002' }, output_modalities: ['text'] },
+    { id: 'credit-text', x_billing: 'credit', quota_multiplier: 1, output_modalities: ['text'] },
+    { id: 'image-only', output_modalities: ['image'] },
+  ]);
+  assert.equal(isModelEligibleForTier(models[0]), true);
+  assert.equal(isModelEligibleForTier(models[1]), false);
+  assert.equal(isTextOutputModel(models[2]), false);
+  assert.equal(isModelEligibleForTier(models[2]), false);
+  assert.match(formatModelLabel(models[1]), /requires a credit balance/);
+  assert.match(formatModelLabel(models[0]), /plan 2 credits\/request/);
 });
 
 test('help explains task, async, status, provider, tier, and cancellation options', () => {
