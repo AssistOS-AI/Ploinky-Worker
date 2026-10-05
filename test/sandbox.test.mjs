@@ -61,11 +61,17 @@ test('time, memory and size limits stop a program', async () => {
   r = await runProgram(`async function run() { for (;;) { await null; } }`, null, api(), { timeMs: 1500 });
   assert.equal(r.code, 'sandbox_time_limit');
   r = await runProgram(`async function run() { const a = []; for (;;) a.push(new Array(1e6).fill(1)); }`, null, api(), { timeMs: 20000, heapMb: 32 });
-  assert.ok(['sandbox_memory_limit', 'sandbox_crashed', 'sandbox_error'].includes(r.code), r.code);
+  // The limit holds even when the host runs with NODE_OPTIONS=--max-old-space-size=8192 (the sandbox is its own process).
+  assert.equal(r.code, 'sandbox_memory_limit', r.message);
   r = await runProgram('x'.repeat(30000), null, api());
   assert.equal(r.code, 'sandbox_too_long');
   r = await runProgram(`async function run() { return 'x'.repeat(300000); }`, null, api());
   assert.equal(r.code, 'sandbox_result_limit');
   r = await runProgram(`function run( {`, null, api());
   assert.equal(r.ok, false);
+});
+
+test('many sandboxes at once all finish (bounded concurrency)', async () => {
+  const many = await Promise.all(Array.from({ length: 40 }, (_, i) => runProgram(`async function run(api, input) { return input * 2; }`, i, {})));
+  assert.ok(many.every((r, i) => r.ok && r.value === i * 2));
 });
