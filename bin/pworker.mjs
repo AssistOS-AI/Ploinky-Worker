@@ -27,6 +27,35 @@ const json = (v) => console.log(JSON.stringify(v, null, 2));
 const client = () => createPworkerClient({ purpose: 'pworker:cli', client: 'pworker' });
 const sleep = (n) => new Promise((resolve) => setTimeout(resolve, n));
 
+// The persistent queue: every change happens under a lock folder, and a flush first renames the queue to a snapshot of its own, so
+// entries queued while a flush runs are never lost and two flushes never run the same entry.
+const queueLock = path.join(home, 'queue.lock');
+async function withQueueLock(fn) {
+  for (let i = 0; ; i++) {
+    try { fs.mkdirSync(queueLock); break; }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      try { if (Date.now() - fs.statSync(queueLock).mtimeMs > 30_000) { fs.rmdirSync(queueLock); continue; } } catch {}
+      if (i > 400) throw new Error(`The queue is locked by another pworker command (${queueLock})`);
+      await sleep(25);
+    }
+  }
+  try { return await fn(); } finally { try { fs.rmdirSync(queueLock); } catch {} }
+}
+const readQueue = (file = queueFile) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return []; throw error; } };
+function writeQueue(entries) { const tmp = `${queueFile}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(entries, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmp, queueFile); }
+const appendQueue = (entries) => withQueueLock(() => { const all = [...readQueue(), ...entries]; writeQueue(all); return all.length; });
+/** Moves the whole queue to a snapshot file owned by this flush and returns {entries, snapshot}. */
+const takeQueue = () => withQueueLock(() => {
+  if (!fs.existsSync(queueFile)) return { entries: [], snapshot: null };
+  const snapshot = path.join(home, `queue-flush-${process.pid}-${randomUUID()}.json`);
+  fs.renameSync(queueFile, snapshot);
+  return { entries: readQueue(snapshot), snapshot };
+});
+// Text that names a task file (an existing path, or a single word ending in .json/.mjs) is stored as an absolute path at queue time.
+const isTaskFile = (request) => /\.(mjs|json)$/.test(request) && (fs.existsSync(request) || !/\s/.test(request.trim()));
+const KNOWN_COMMANDS = new Set(['help', 'status', 'serve', 'start', 'stop', 'stats', 'models', 'provider', 'tier', 'queue', 'run', 'flush', '_execute-batch']);
+
 function readUserConfig() { return JSON.parse(fs.readFileSync(configFile, 'utf8')); }
 function saveUserConfig(c) { fs.writeFileSync(configFile, JSON.stringify(c, null, 2) + '\n', { mode: 0o600 }); }
 // The proxy of this home: its recorded process exists and answers /health on the recorded port (lib/server.mjs). No process-name
@@ -415,7 +444,8 @@ async function main() {
     if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) throw new Error(`Working directory does not exist: ${folder}`);
     return interactive(fs.realpathSync(folder));
   }
-  if (args.length === 1 && fs.existsSync(command) && fs.statSync(command).isDirectory()) return interactive(fs.realpathSync(command));
+  // A directory opens the menu there, unless its name is a subcommand (a folder named "stats" must not hijack `pworker stats`).
+  if (args.length === 1 && (!KNOWN_COMMANDS.has(command) || command.includes('/')) && fs.existsSync(command) && fs.statSync(command).isDirectory()) return interactive(fs.realpathSync(command));
   if (command === '_execute-batch') return executeDetachedBatch(args[1]);
   if (command === '--status' || command === 'status') {
     const store = jobStore(home);
@@ -444,10 +474,13 @@ async function main() {
     json({ provider: name, models: models.length }); return;
   }
   if (command === 'tier') {
-    const name = option('provider'), model = option('model');
+    const name = option('provider'), model = option('model'), tierName = args[1];
+    if (!tierName || tierName.startsWith('-') || !/^[A-Za-z][\w-]{0,39}$/.test(tierName) || tierName === 'maxWaitMs') throw new Error('Usage: pworker tier TIER --provider NAME --model MODEL_ID [--add] [--batch] (TIER: letters, digits, - and _)');
+    if (!model) throw new Error('Missing --model MODEL_ID');
     const available = connectedProviders(loadLayers().config, await localStates());
     if (!available.includes(name)) throw new Error('Connect the provider before configuring a tier');
     const selected = (await modelsFromProxy(name)).find((entry) => entry.id === model);
+    if (!selected) throw new Error(`Model ${model} is not in the live catalog of ${name}; nothing was saved`);
     if (!isModelEligibleForTier(selected)) throw new Error(`Model ${model} cannot serve a text tier: ${modelExclusionReason(selected)}`);
     const config = loadLayers().config;
     const existing = args.includes('--add') ? tierEntries(config, args[1]) : [];
@@ -457,8 +490,8 @@ async function main() {
     json({ tier: args[1], entries }); return;
   }
   if (command === 'queue' && ['list', 'clear'].includes(args[1])) {
-    if (args[1] === 'clear') { fs.writeFileSync(queueFile, '[]\n', { mode: 0o600 }); console.log('The queue is empty.'); }
-    else json(fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile, 'utf8')) : []);
+    if (args[1] === 'clear') { await withQueueLock(() => writeQueue([])); console.log('The queue is empty.'); }
+    else json(readQueue());
     return;
   }
   if (command === 'run' || command === '--async' || command === 'queue') {
@@ -467,30 +500,44 @@ async function main() {
     let input = option('input', ''); try { input = JSON.parse(input); } catch {}
     const currentWorkingDirectory = option('cwd', option('current-working-directory', null));
     if (command === 'queue') {
-      const pending = fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile, 'utf8')) : [];
-      pending.push({ request, input, currentWorkingDirectory });
-      fs.writeFileSync(queueFile, JSON.stringify(pending, null, 2) + '\n', { mode: 0o600 });
-      console.log(`${pending.length} tasks in the queue.`); return;
+      // Paths are made absolute now: a later flush may run from another folder.
+      if (isTaskFile(request) && !fs.existsSync(request)) throw new Error(`Task file does not exist: ${path.resolve(request)}`);
+      const cwd = currentWorkingDirectory ? fs.realpathSync(path.resolve(currentWorkingDirectory)) : null;
+      if (cwd && !fs.statSync(cwd).isDirectory()) throw new Error(`Working directory is not a directory: ${cwd}`);
+      const count = await appendQueue([{ request: isTaskFile(request) ? path.resolve(request) : request, input, currentWorkingDirectory: cwd }]);
+      console.log(`${count} tasks in the queue.`); return;
     }
     if (command === '--async' || args.includes('--async')) { json(startDetachedTasks([{ request, input, currentWorkingDirectory }])[0]); return; }
     const worker = new Pworker({ client: client(), config: loadLayers().config });
     const entry = await worker.enqueueRequest(request, input, { currentWorkingDirectory });
-    json({ ...entry, results: await worker.flush() }); return;
+    const results = await worker.flush();
+    json({ ...entry, results });
+    if (results.some((r) => !r.ok)) process.exitCode = 1;
+    return;
   }
   if (command === 'flush') {
-    const pending = fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile, 'utf8')) : [];
+    const { entries: pending, snapshot } = await takeQueue();
+    const finish = async (failed) => { if (failed.length) await appendQueue(failed); if (snapshot) fs.rmSync(snapshot, { force: true }); };
     if (args.includes('--async')) {
-      const jobs = pending.length ? startDetachedTasks(pending) : [];
-      fs.writeFileSync(queueFile, '[]\n', { mode: 0o600 });
+      let jobs = [];
+      try { jobs = pending.length ? startDetachedTasks(pending) : []; }
+      catch (error) { await finish(pending); throw error; }
+      await finish([]);
       json(jobs); return;
     }
     const worker = new Pworker({ client: client(), config: loadLayers().config });
-    const entries = [];
-    for (const item of pending) entries.push(await worker.enqueueRequest(item.request, item.input, { currentWorkingDirectory: item.currentWorkingDirectory }));
-    const results = await worker.flush();
-    const failed = results.filter((r) => !r.ok);
-    fs.writeFileSync(queueFile, JSON.stringify(failed.map((r) => pending[results.findIndex((x) => x.id === r.id)]), null, 2) + '\n', { mode: 0o600 });
-    json({ entries, results }); return;
+    const entries = [], failed = [], byId = new Map();
+    // One bad entry (a missing file, an invalid task) fails alone and stays queued; the others run.
+    for (const item of pending) {
+      try { const entry = await worker.enqueueRequest(item.request, item.input, { currentWorkingDirectory: item.currentWorkingDirectory }); entries.push(entry); byId.set(entry.id, item); }
+      catch (error) { entries.push({ request: item.request, error: error.message }); failed.push(item); }
+    }
+    let results = [];
+    try { results = await worker.flush(); }
+    finally { await finish([...failed, ...results.filter((r) => !r.ok).map((r) => byId.get(r.id)).filter(Boolean), ...(results.length ? [] : [...byId.values()])]); }
+    json({ entries, results });
+    if (failed.length || results.some((r) => !r.ok)) process.exitCode = 1;
+    return;
   }
   console.log('pworker [run <task.json|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
 }

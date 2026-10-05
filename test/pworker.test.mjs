@@ -175,3 +175,65 @@ test('credit-billed and non-text models cannot enter automatic text tiers', () =
 test('help explains task, async, status, provider, tier, and cancellation options', () => {
   for (const word of ['--async', '--status', '--cwd', 'provider NAME', 'tier TIER', 'Esc cancels', 'flush --async']) assert.ok(HELP.includes(word), word);
 });
+
+test('CLI queue stores absolute paths; flush runs good entries, keeps only failed ones and exits 1', { timeout: 30_000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-queue-'));
+  const home = path.join(root, 'home'), work = path.join(root, 'work'), elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(work); fs.mkdirSync(elsewhere);
+  fs.writeFileSync(path.join(work, 'task.json'), JSON.stringify({ begin: { tier: null, code: 'this.end(String(this.input).toUpperCase())' } }));
+  const socket = net.createServer();
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
+  const port = socket.address().port;
+  await new Promise((resolve) => socket.close(resolve));
+  const env = { ...process.env, PWORKER_HOME: home, PWORKER_PORT: String(port) };
+  const bin = path.resolve('bin/pworker.mjs');
+  const cli = (cwd, ...args) => exec(process.execPath, [bin, ...args], { env, cwd });
+  try {
+    await cli(work, 'queue', 'task.json', '--input', 'first', '--cwd', '.');
+    const queued = JSON.parse((await cli(elsewhere, 'queue', 'list')).stdout);
+    assert.equal(queued[0].request, path.join(fs.realpathSync(work), 'task.json'));
+    assert.equal(queued[0].currentWorkingDirectory, fs.realpathSync(work));
+    await assert.rejects(cli(work, 'queue', 'missing.json'), /does not exist/);
+    fs.writeFileSync(path.join(home, 'queue.json'), JSON.stringify([...queued, { request: path.join(root, 'gone.json'), input: 'x', currentWorkingDirectory: null }]));
+    const failed = await cli(elsewhere, 'flush').then(() => null, (error) => error);
+    assert.equal(failed?.code, 1);
+    const out = JSON.parse(failed.stdout);
+    assert.equal(out.results[0].value, 'FIRST');
+    assert.match(out.entries[1].error, /does not exist/);
+    const left = JSON.parse(fs.readFileSync(path.join(home, 'queue.json'), 'utf8'));
+    assert.deepEqual(left.map((e) => e.request), [path.join(root, 'gone.json')]);
+  } finally {
+    await exec(process.execPath, [bin, 'stop'], { env }).catch(() => {});
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI tier refuses a model missing from the live catalog and an invalid tier name; nothing is saved', { timeout: 30_000 }, async () => {
+  const http = await import('node:http');
+  const catalog = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'real-model', output_modalities: ['text'] }] })); });
+  await new Promise((resolve) => catalog.listen(0, '127.0.0.1', resolve));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-tier-')), home = path.join(root, 'home');
+  fs.mkdirSync(path.join(home, 'keys'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ providers: { fake: { baseUrl: `http://127.0.0.1:${catalog.address().port}`, envFile: 'fake.env', keyVar: 'PWORKER_FAKE_API_KEY', modelsPath: '/v1/models', formats: { openai: '/v1/chat/completions' } } } }));
+  fs.writeFileSync(path.join(home, 'keys', 'fake.env'), 'PWORKER_FAKE_API_KEY=not-a-real-key\n');
+  const socket = net.createServer();
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
+  const port = socket.address().port;
+  await new Promise((resolve) => socket.close(resolve));
+  // The CLI talks to its own proxy in the temporary home, which reads the catalog of the local fake endpoint only.
+  const { NODE_TEST_CONTEXT: _context, ...parent } = process.env;
+  const env = { ...parent, PWORKER_HOME: home, PWORKER_PORT: String(port) };
+  const bin = path.resolve('bin/pworker.mjs');
+  const cli = (...args) => exec(process.execPath, [bin, ...args], { env });
+  try {
+    await assert.rejects(cli('tier', 'small', '--provider', 'fake', '--model', 'TYPO'), /not in the live catalog/);
+    await assert.rejects(cli('tier', '--provider', 'fake', '--model', 'real-model'), /Usage: pworker tier/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).tiers, undefined);
+    const saved = JSON.parse((await cli('tier', 'small', '--provider', 'fake', '--model', 'real-model')).stdout);
+    assert.deepEqual(saved.entries, [{ provider: 'fake', model: 'real-model' }]);
+  } finally {
+    await exec(process.execPath, [bin, 'stop'], { env }).catch(() => {});
+    catalog.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
