@@ -31,7 +31,17 @@
         "maxConcurrent": 4,
         "maxPerSecond": 5,
         "maxPerMinute": 15,
-        "maxPerHour": 800
+        "maxPerHour": 800,
+        "pacing": "even",
+        "safetyMargin": 0,
+        "windowSlackMs": 1500,
+        "abortHoldMs": 30000,
+        "adaptive": {
+          "decrease": 0.7,
+          "min": 0.2,
+          "cooldownMs": 300000,
+          "increase": 0.1
+        }
       },
       "retry": {
         "max": 4,
@@ -70,7 +80,8 @@
             "max": 7500
           }
         ]
-      }
+      },
+      "_limitsNote": "15 requests per minute are sent one every 4 s (pacing even), with 1.5 s of window slack for network jitter. A 429 pauses the provider for its full Retry-After and lowers the rate by the adaptive factor, which recovers by 0.1 every 5 minutes without a 429. An attempt aborted after it was sent keeps its slot for 30 s. See docs/rate-limits.md."
     },
     "openrouter": {
       "baseUrl": "https://openrouter.ai/api",
@@ -85,7 +96,9 @@
         "maxConcurrent": 8,
         "maxPerSecond": 5,
         "maxPerMinute": 120,
-        "maxPerHour": 3000
+        "maxPerHour": 3000,
+        "windowSlackMs": 1000,
+        "abortHoldMs": 15000
       },
       "retry": {
         "max": 4,
@@ -105,7 +118,9 @@
         "maxConcurrent": 8,
         "maxPerSecond": 5,
         "maxPerMinute": 120,
-        "maxPerHour": 3000
+        "maxPerHour": 3000,
+        "windowSlackMs": 1000,
+        "abortHoldMs": 15000
       },
       "retry": {
         "max": 4,
@@ -244,7 +259,9 @@
       },
       "limits": {
         "maxConcurrent": 4,
-        "maxPerMinute": 60
+        "maxPerMinute": 60,
+        "windowSlackMs": 1000,
+        "abortHoldMs": 15000
       }
     },
     "zai": {
@@ -257,7 +274,9 @@
       },
       "limits": {
         "maxConcurrent": 4,
-        "maxPerMinute": 60
+        "maxPerMinute": 60,
+        "windowSlackMs": 1000,
+        "abortHoldMs": 15000
       }
     },
     "grok": {
@@ -270,7 +289,9 @@
       },
       "limits": {
         "maxConcurrent": 4,
-        "maxPerMinute": 60
+        "maxPerMinute": 60,
+        "windowSlackMs": 1000,
+        "abortHoldMs": 15000
       }
     }
   },
