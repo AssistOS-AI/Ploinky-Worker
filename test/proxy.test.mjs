@@ -64,7 +64,7 @@ test('models list is passed through and cached; health hides the key', async () 
     await fetch(t.base + '/v1/models');
     assert.equal(a.data[0].quota_multiplier, 2);
     assert.equal(t.seen.filter((s) => s.url === '/v1/models').length, 1);
-    assert.equal(t.seen[0].auth, undefined);
+    assert.equal(t.seen[0].auth, `Bearer ${KEY}`);
     const h = await (await fetch(t.base + '/health')).text();
     assert.ok(h.includes('"key_configured":true') && !h.includes(KEY));
   } finally { await t.close(); }

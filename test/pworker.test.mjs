@@ -8,6 +8,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Pworker, batchTemplate, compileTask, loadTask, validateTask } from '../lib/pworker/task.mjs';
 import { jobStore } from '../lib/pworker/jobs.mjs';
+import { connectedProviders, fetchModelCatalog, providerSpec } from '../lib/pworker/providers.mjs';
+import { HELP } from '../lib/pworker/help.mjs';
 
 const exec = promisify(execFile);
 
@@ -125,4 +127,23 @@ test('CLI --async returns an ID and --status retrieves the finished result', { t
     await exec(process.execPath, [bin, 'stop'], { env }).catch(() => {});
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('provider setup checks a live model catalog before a tier can use it', async () => {
+  const spec = providerSpec('sample', 'https://example.test/v1', 'secret', 25);
+  assert.equal(spec.baseUrl, 'https://example.test/v1');
+  assert.equal(spec.modelsPath, '/models');
+  let seen;
+  const models = await fetchModelCatalog(spec, { key: 'secret', fetchImpl: async (url, init) => {
+    seen = { url, auth: init.headers.authorization };
+    return { ok: true, json: async () => ({ data: [{ id: 'model-b' }, { id: 'model-a' }] }) };
+  } });
+  assert.deepEqual(models, ['model-a', 'model-b']);
+  assert.deepEqual(seen, { url: 'https://example.test/v1/models', auth: 'Bearer secret' });
+  assert.deepEqual(connectedProviders({ providers: { sample: spec, local: { noKey: true, start: {} } } }, { local: { running: false } }, { PWORKER_SAMPLE_API_KEY: 'secret' }), ['sample']);
+  assert.deepEqual(connectedProviders({ providers: { local: { noKey: true, start: {} } } }, { local: { running: true } }, {}), ['local']);
+});
+
+test('help explains task, async, status, provider, tier, and cancellation options', () => {
+  for (const word of ['--async', '--status', '--cwd', 'provider NAME', 'tier TIER', 'Esc cancels', 'flush --async']) assert.ok(HELP.includes(word), word);
 });

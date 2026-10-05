@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Ploinky Workers is an open source CLI and library for deterministic, phased LLM tasks, provider routing, request batching, and local inference workflows.">
+  <meta name="color-scheme" content="dark">
+  <title>Ploinky Workers — Small, deliberate model workflows</title>
+  <style>
+    :root {
+      --bg: #0b1117;
+      --surface: #121d25;
+      --surface-2: #182630;
+      --line: #2b3d46;
+      --text: #edf5f2;
+      --muted: #a7bab8;
+      --green: #91e3b2;
+      --orange: #ffc085;
+      --blue: #9dcfff;
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--text); background: radial-gradient(circle at 86% 2%, #1a3a3a 0, transparent 32rem), radial-gradient(circle at 5% 20%, #202b37 0, transparent 28rem), var(--bg); line-height: 1.62; }
+    a { color: var(--green); text-underline-offset: .2em; }
+    a:hover { color: #c7ffda; }
+    :focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; border-radius: 4px; }
+    .wrap { width: min(1160px, calc(100% - 44px)); margin: 0 auto; }
+    .topbar { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(18px); background: #0b1117dd; border-bottom: 1px solid #31434b80; }
+    .nav { display: flex; align-items: center; justify-content: space-between; min-height: 72px; gap: 24px; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; font-weight: 780; letter-spacing: -.025em; white-space: nowrap; }
+    .mark { display: grid; place-items: center; width: 37px; height: 37px; border: 1px solid #a0e5b0; border-radius: 11px; color: #0d221b; background: linear-gradient(145deg, #baf4c8, #68c9b2); box-shadow: 0 4px 22px #79d9a02a; font-size: 20px; }
+    nav ul { display: flex; align-items: center; gap: clamp(12px, 2.5vw, 30px); list-style: none; margin: 0; padding: 0; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .92rem; font-weight: 590; }
+    nav a:hover { color: var(--text); }
+    .hero { padding: clamp(74px, 10vw, 138px) 0 76px; display: grid; grid-template-columns: 1.1fr .9fr; gap: clamp(36px, 6vw, 86px); align-items: center; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 9px; color: var(--green); text-transform: uppercase; letter-spacing: .16em; font-size: .72rem; font-weight: 820; }
+    .eyebrow::before { content: ''; width: 20px; height: 2px; background: currentColor; }
+    h1, h2, h3 { line-height: 1.12; letter-spacing: -.042em; }
+    h1 { font-size: clamp(3rem, 6.2vw, 5.7rem); margin: 23px 0 22px; max-width: 760px; }
+    h1 em { color: var(--green); font-style: normal; }
+    .lead { color: #c1d1cf; font-size: clamp(1.08rem, 1.55vw, 1.25rem); max-width: 670px; margin: 0 0 30px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 46px; padding: 11px 18px; border: 1px solid #6eaf8d; border-radius: 10px; font-weight: 720; text-decoration: none; background: var(--green); color: #0b1d18; }
+    .button:hover { background: #bcf6cc; color: #0b1d18; }
+    .button.secondary { background: #1b2b32; border-color: #40565d; color: var(--text); }
+    .button.secondary:hover { background: #283d45; color: var(--text); }
+    .subline { margin: 18px 0 0; color: var(--muted); font-size: .88rem; }
+    .terminal { background: #0b151b; border: 1px solid #40565b; border-radius: 17px; overflow: hidden; box-shadow: 0 24px 80px #0007, inset 0 1px #ffffff0a; transform: rotate(1deg); }
+    .terminal-bar { display: flex; align-items: center; gap: 7px; border-bottom: 1px solid #2e434a; padding: 12px 16px; color: #9ab1ae; font-size: .76rem; }
+    .dot { height: 9px; width: 9px; border-radius: 50%; background: #d76f6d; }
+    .dot:nth-child(2) { background: #e6ba70; }
+    .dot:nth-child(3) { background: #76c89a; }
+    .terminal-title { margin-left: auto; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    pre { margin: 0; overflow: auto; white-space: pre; font: .86rem/1.75 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+    .terminal pre { padding: 21px 23px 25px; }
+    .prompt { color: var(--green); }.comment { color: #829c9a; }.key { color: var(--orange); }.value { color: var(--blue); }
+    .stripe { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #152229a6; }
+    .stripe .wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; padding: 26px 0; }
+    .stripe strong { display: block; color: var(--text); font-size: .99rem; }
+    .stripe span { color: var(--muted); font-size: .82rem; }
+    section { padding: 94px 0; }
+    .section-head { max-width: 760px; margin-bottom: 36px; }
+    h2 { font-size: clamp(2.2rem, 4vw, 3.55rem); margin: 15px 0 16px; }
+    .section-head p, .intro { color: var(--muted); font-size: 1.09rem; margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
+    .card { padding: 26px 25px 28px; background: linear-gradient(150deg, #192a31, #111d25); border: 1px solid var(--line); border-radius: var(--radius); min-height: 205px; }
+    .icon { color: var(--green); font-size: 1.4rem; line-height: 1; }
+    h3 { font-size: 1.3rem; margin: 18px 0 10px; }
+    .card p, .panel p { color: var(--muted); margin: 0; }
+    .card strong { color: var(--text); }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 35px; }
+    .step { position: relative; border-left: 2px solid var(--green); padding: 5px 17px 9px; }
+    .step small { color: var(--green); font: 720 .73rem ui-monospace, monospace; }
+    .step h3 { margin: 9px 0 7px; font-size: 1.11rem; }
+    .step p { margin: 0; color: var(--muted); font-size: .91rem; }
+    .split { display: grid; grid-template-columns: .8fr 1.2fr; gap: clamp(28px, 5vw, 72px); align-items: start; }
+    .code { border: 1px solid #38515a; border-radius: var(--radius); background: #0a151b; overflow: hidden; }
+    .code-label { border-bottom: 1px solid #2b414a; color: var(--green); font: 700 .74rem ui-monospace, monospace; padding: 10px 18px; text-transform: uppercase; letter-spacing: .08em; }
+    .code pre { padding: 20px 22px 24px; }
+    .bullets { padding: 0; margin: 24px 0 0; list-style: none; }
+    .bullets li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 9px 0; color: #c9d7d4; }
+    .bullets li::before { content: '✓'; color: var(--green); font-weight: 800; }
+    .panel { border: 1px solid #46614e; background: linear-gradient(135deg, #1a3731, #15242a 70%); padding: clamp(25px, 4vw, 43px); border-radius: 23px; }
+    .panel.orange { border-color: #74604c; background: linear-gradient(135deg, #3a3029, #1d292b 70%); }
+    .panel h2 { margin-top: 0; }
+    .panel h3 { margin-top: 0; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .mini { padding: 20px; border: 1px solid #ffffff26; border-radius: 12px; background: #ffffff08; }
+    .mini strong { display: block; color: var(--text); margin-bottom: 7px; }
+    .mini p { font-size: .92rem; }
+    .callout { display: flex; gap: 16px; align-items: start; margin-top: 22px; border-top: 1px solid #ffffff2b; padding-top: 20px; color: #d2ded9; }
+    .callout span { color: var(--orange); font-size: 1.3rem; }
+    code { color: #b9efcf; background: #ffffff0e; border: 1px solid #ffffff16; padding: .08em .3em; border-radius: 4px; font-size: .9em; }
+    pre code { background: none; border: 0; padding: 0; color: #d9e9e5; font-size: inherit; }
+    .comparison { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+    .comparison div { display: grid; grid-template-columns: 190px 1fr; gap: 22px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+    .comparison div:last-child { border-bottom: 0; }
+    .comparison strong { color: var(--green); }
+    .comparison span { color: var(--muted); }
+    footer { border-top: 1px solid var(--line); padding: 35px 0 52px; color: var(--muted); font-size: .91rem; }
+    footer .wrap { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    @media (max-width: 900px) { .hero, .split { grid-template-columns: 1fr; }.hero { padding-top: 72px; }.terminal { transform: none; }.grid { grid-template-columns: repeat(2, 1fr); }.steps { grid-template-columns: repeat(2, 1fr); }.stripe .wrap { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) { .wrap { width: min(100% - 30px, 1160px); } .nav { min-height: 62px; } nav ul { gap: 12px; } nav li:nth-child(2), nav li:nth-child(3) { display: none; } nav a { font-size: .82rem; } .hero { padding: 62px 0; } section { padding: 68px 0; } .grid, .steps, .two { grid-template-columns: 1fr; }.stripe .wrap { gap: 18px; } .comparison div { grid-template-columns: 1fr; gap: 5px; } footer .wrap { align-items: start; flex-direction: column; } pre { font-size: .77rem; } }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap nav">
+      <a class="brand" href="#top" aria-label="Ploinky Workers home"><span class="mark" aria-hidden="true">↗</span><span>Ploinky Workers</span></a>
+      <nav aria-label="Primary navigation"><ul><li><a href="#uses">Use cases</a></li><li><a href="#concepts">Concepts</a></li><li><a href="#batching">Batching</a></li><li><a href="#start">Get started</a></li></ul></nav>
+    </div>
+  </header>
+  <main id="top">
+    <div class="wrap hero">
+      <div>
+        <span class="eyebrow">Open source · Node.js · CLI + library</span>
+        <h1>Small, deliberate <em>model workflows.</em></h1>
+        <p class="lead">Turn a request into a reusable sequence of model calls and JavaScript steps. Route work by model tier, collect tasks, batch eligible requests, and inspect progress without building a complicated agent loop.</p>
+        <div class="actions"><a class="button" href="#start">Get started <span aria-hidden="true">→</span></a><a class="button secondary" href="../PWORKER.md">Read the CLI guide</a></div>
+        <p class="subline">One command: <code>pworker</code>. One independent local proxy. Your keys and runtime data stay in your user home.</p>
+      </div>
+      <div class="terminal" aria-label="Example Pworker CLI session">
+        <div class="terminal-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="terminal-title">terminal · pworker</span></div>
+        <pre><span class="comment"># Connect a provider and select a tier in the menu</span>
+<span class="prompt">$</span> pworker
+
+<span class="comment"># Submit work without waiting</span>
+<span class="prompt">$</span> pworker run ./extract.mjs \
+    --input '{"input":"report.txt"}' \
+    --cwd ./project --async
+{
+  <span class="key">"id"</span>: <span class="value">"9f3…"</span>,
+  <span class="key">"status"</span>: <span class="value">"queued"</span>
+}
+
+<span class="prompt">$</span> pworker --status 9f3…
+{
+  <span class="key">"status"</span>: <span class="value">"running"</span>,
+  <span class="key">"phase"</span>: <span class="value">"extract"</span>
+}</pre>
+      </div>
+    </div>
+    <div class="stripe"><div class="wrap"><div><strong>Deterministic phases</strong><span>Readable task files, explicit transitions</span></div><div><strong>Provider choice</strong><span>Remote APIs and local model servers</span></div><div><strong>Measured execution</strong><span>Limits, cache, byte counts, status</span></div><div><strong>Optional batching</strong><span>Fewer repetitive model requests</span></div></div></div>
+
+    <section id="uses" class="wrap">
+      <div class="section-head"><span class="eyebrow">What it is for</span><h2>Put repeatable model work on rails.</h2><p>Ploinky Workers is useful when the shape of a task is known, but the inputs keep changing. It keeps model selection, execution, and observation in one place.</p></div>
+      <div class="grid">
+        <article class="card"><div class="icon" aria-hidden="true">▤</div><h3>Document processing</h3><p>Extract fields, classify text, normalize records, summarize sections, or run a follow-up validation phase over many inputs.</p></article>
+        <article class="card"><div class="icon" aria-hidden="true">⌁</div><h3>Code and file workflows</h3><p>Read and write text files under a caller-chosen working directory. Keep each task's variables and progress separate.</p></article>
+        <article class="card"><div class="icon" aria-hidden="true">⇢</div><h3>Background jobs</h3><p>Return a task ID immediately, then ask for the current phase, final result, or error whenever your client is ready.</p></article>
+        <article class="card"><div class="icon" aria-hidden="true">▦</div><h3>Bulk requests</h3><p>Queue many tasks, flush them together, and combine compatible phase requests into one structured model prompt.</p></article>
+        <article class="card"><div class="icon" aria-hidden="true">◉</div><h3>Provider routing</h3><p>Ask for a logical tier such as <code>tiny</code> or <code>good</code>. Configure its actual provider and model once in the CLI.</p></article>
+        <article class="card"><div class="icon" aria-hidden="true">◎</div><h3>Local inference</h3><p>Use an existing local endpoint or start a configured local model through the proxy. The same task format works with remote APIs.</p></article>
+      </div>
+    </section>
+
+    <section id="concepts" class="stripe"><div class="wrap">
+      <div class="section-head"><span class="eyebrow">Core concepts</span><h2>A task is a small flow, not a wandering agent.</h2><p>A natural-language request can be compiled into a cached <code>.mjs</code> task file. You can also write the task file yourself and review every phase.</p></div>
+      <div class="steps">
+        <div class="step"><small>01 / INPUT</small><h3>Supply the task</h3><p>Pass a text request or a JavaScript module, plus start-phase input and an optional working directory.</p></div>
+        <div class="step"><small>02 / PHASES</small><h3>Advance explicitly</h3><p>Each phase has a tier or no model, a prompt template, and code that chooses the next phase or ends the task.</p></div>
+        <div class="step"><small>03 / PROXY</small><h3>Route and control</h3><p>The local proxy resolves tiers, applies provider limits, records traffic, and caches complete repeat requests.</p></div>
+        <div class="step"><small>04 / RESULT</small><h3>Inspect the outcome</h3><p>Wait for the result or return an ID. Status reports the current phase and persists the final result.</p></div>
+      </div>
+    </div></section>
+
+    <section class="wrap"><div class="split">
+      <div><span class="eyebrow">Task anatomy</span><h2>Readable steps you can own.</h2><p class="intro">A phase can call a model, transform its answer, and pass state forward. A model-free phase can perform file work or finish with a structured value.</p><ul class="bullets"><li><span><strong>tier</strong> names a configured capability, not a hard-coded model.</span></li><li><span><strong>template</strong> inserts task variables such as <code>$input</code>.</span></li><li><span><strong>code</strong> uses <code>this.next()</code>, <code>this.end()</code>, and confined file methods.</span></li><li><span><strong>currentWorkingDirectory</strong> is the exact directory supplied by the caller.</span></li></ul></div>
+      <div class="code"><div class="code-label">example-task.mjs</div><pre><code>export default {
+  begin: {
+    tier: 'tiny',
+    template: 'Extract a short title from: $input',
+    code: 'this.title = result; this.next("save")'
+  },
+  save: {
+    tier: null,
+    code: `await this.writeFile(
+      "title.txt", this.title
+    ); this.end({ title: this.title })`
+  }
+};</code></pre></div>
+    </div></section>
+
+    <section id="batching" class="wrap"><div class="panel">
+      <span class="eyebrow">Batching</span><h2>Pack repeated work. Keep results separate.</h2>
+      <p>When a phase opts into batching and its tier enables it, compatible tasks can share one prompt. Pworker gives each item an ID, asks for a JSON result map, and routes each answer back to the right task before execution continues.</p>
+      <div class="two" style="margin-top: 26px"><div class="mini"><strong>What works today</strong><p>Explicit queue and flush; prompt-level aggregation when the phase template ends in one <code>$variable</code>; one model request for a compatible group; independent per-task results and status.</p></div><div class="mini"><strong>Where GPU batching fits</strong><p>The same queue, tier, and ID-based dispatch approach can support GPU batching with a compatible local inference server and scheduler. Actual GPU execution batching depends on that server's capabilities and configuration.</p></div></div>
+      <div class="callout"><span aria-hidden="true">↗</span><div>Batching can reduce the number of API requests. It does not automatically reduce token use or latency, and prompt packing is distinct from provider Batch APIs and server-side GPU scheduling.</div></div>
+    </div></section>
+
+    <section class="wrap"><div class="section-head"><span class="eyebrow">Operation</span><h2>Made to run, inspect, and adjust.</h2><p>Configuration is interactive, while the same capabilities remain scriptable from the CLI and library.</p></div><div class="grid">
+      <article class="card"><div class="icon" aria-hidden="true">◇</div><h3>Connect first</h3><p>The menu accepts a provider API key, an OpenAI-compatible endpoint, or a managed local model. Tier setup appears after a provider is connected and lists its live models.</p></article>
+      <article class="card"><div class="icon" aria-hidden="true">◷</div><h3>Observe work</h3><p><code>pworker --status</code> lists detached tasks. A task ID retrieves its current phase, completed result, or error after the original process exits.</p></article>
+      <article class="card"><div class="icon" aria-hidden="true">▣</div><h3>Keep control</h3><p>Provider keys and runtime files live under <code>~/.pworker</code>. Rate limits, response caching, request counts, and bytes transferred are visible through the proxy.</p></article>
+    </div></section>
+
+    <section id="start" class="wrap"><div class="split"><div><span class="eyebrow">Get started</span><h2>One program, a few clear commands.</h2><p class="intro">Requires Node.js 22.13 or newer. Open the interactive menu to connect a provider and map a model to a tier. Press Esc to cancel a menu step. Provider credentials are checked against the live model catalog; tier mappings are saved after their final confirmation.</p><div class="actions"><a class="button" href="../PWORKER.md">Full guide <span aria-hidden="true">→</span></a><a class="button secondary" href="../README.md">Repository overview</a></div></div><div class="code"><div class="code-label">quick start</div><pre><code>npm link
+pworker                 # connect and configure
+pworker --help          # all commands and options
+
+pworker run ./task.mjs --input 'hello'
+pworker queue ./task.mjs --input 'first'
+pworker queue ./task.mjs --input 'second'
+pworker flush --async
+pworker --status</code></pre></div></div></section>
+
+    <section class="wrap"><div class="panel orange"><span class="eyebrow" style="color: var(--orange)">Open source and evolving</span><h2>Start with the open source edition.</h2><p>This edition focuses on the task format, a practical CLI, provider routing, local models, batching, monitoring, and persistent background execution. We plan to add capabilities gradually as the project matures. For specialized deployments and more sophisticated use cases, consulting is available to help design provider setups, task flows, batching strategies, and local inference integrations.</p></div></section>
+  </main>
+  <footer><div class="wrap"><span>© Ploinky Workers · Open source edition</span><span>Documentation: <a href="../PWORKER.md">CLI and library guide</a> · <a href="../README.md">Project overview</a></span></div></footer>
+</body>
+</html>

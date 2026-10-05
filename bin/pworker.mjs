@@ -13,6 +13,7 @@ import { jobStore } from '../lib/pworker/jobs.mjs';
 import { selectMenu, promptField } from '../lib/pworker/menu.mjs';
 import { connectedProviders, fetchModelCatalog, providerSpec } from '../lib/pworker/providers.mjs';
 import { resolveUpstream } from '../lib/settings.mjs';
+import { HELP } from '../lib/pworker/help.mjs';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -177,9 +178,9 @@ async function connectProvider(screen) {
       const name = selected.slice(4), provider = config.providers[name];
       const resolved = resolveUpstream(name, provider);
       let key = resolved.key;
-      if (key) {
+      if (key || provider.noKey) {
         const action = await selectMenu(screen, `${name} credentials`, [
-          { label: 'Use configured API key', value: 'use' },
+          { label: key ? 'Use configured API key' : 'Use keyless endpoint', value: 'use' },
           ...(!process.env[provider.keyVar] ? [{ label: 'Replace API key', value: 'replace' }] : []),
         ]);
         if (!action) continue;
@@ -254,7 +255,7 @@ async function interactive() {
       const available = connectedProviders(loadLayers().config, await localStates());
       const choice = await selectMenu(screen, `Ploinky Workers · ${available.length} connected provider${available.length === 1 ? '' : 's'}`, [
         { label: 'Log in / connect provider', value: 'connect' },
-        { label: available.length ? 'Configure tier' : 'Configure tier · connect a provider first', value: 'tier' },
+        ...(available.length ? [{ label: 'Configure tier', value: 'tier' }] : []),
         { label: 'Run task', value: 'run' },
         { label: 'Manage local models', value: 'local' },
         { label: 'Statistics', value: 'stats' },
@@ -291,6 +292,7 @@ async function interactive() {
 }
 
 async function main() {
+  if (command === 'help' || args.includes('--help') || args.includes('-h')) { process.stdout.write(HELP); return; }
   ensureUserHome();
   if (!command) return interactive();
   if (command === '_execute-batch') return executeDetachedBatch(args[1]);
@@ -311,11 +313,26 @@ async function main() {
   }
   if (command === 'start') { await startProxy(); console.log('Proxy started.'); return; }
   if (command === 'stop') { console.log((await stopProxy()) ? 'Proxy stopped.' : 'The proxy is not running.'); return; }
-  if (['run', '--async', 'queue', 'flush', 'stats', 'models'].includes(command)) await startProxy();
+  if (['run', '--async', 'queue', 'flush', 'stats', 'models', 'tier'].includes(command)) await startProxy();
   if (command === 'stats') { json(await client().stats()); return; }
   if (command === 'models') { const action = args[1]; json(action === 'start' || action === 'stop' ? await client().model(args[2], action) : await client().models()); return; }
-  if (command === 'provider') { setProvider(args[1], option('endpoint'), option('key'), option('rpm', 60)); await restartProxy(); return; }
-  if (command === 'tier') { setTier(args[1], option('provider'), option('model'), args.includes('--batch') ? true : undefined); await restartProxy(); return; }
+  if (command === 'provider') {
+    const name = args[1], key = option('key', '');
+    const prior = loadLayers().config.providers?.[name] ?? {};
+    if (prior.start) throw new Error('Use the local model menu to start a managed local provider');
+    const spec = providerSpec(name, option('endpoint'), key, option('rpm', 60), prior);
+    const models = await fetchModelCatalog(spec, { key });
+    saveProvider(name, spec, key); await restartProxy();
+    json({ provider: name, models: models.length }); return;
+  }
+  if (command === 'tier') {
+    const name = option('provider'), model = option('model');
+    const available = connectedProviders(loadLayers().config, await localStates());
+    if (!available.includes(name)) throw new Error('Connect the provider before configuring a tier');
+    if (!(await modelsFromProxy(name)).includes(model)) throw new Error(`Model ${model} is not in the provider model list`);
+    setTier(args[1], name, model, args.includes('--batch') ? true : undefined); await restartProxy();
+    json({ tier: args[1], provider: name, model }); return;
+  }
   if (command === 'queue' && ['list', 'clear'].includes(args[1])) {
     if (args[1] === 'clear') { fs.writeFileSync(queueFile, '[]\n', { mode: 0o600 }); console.log('The queue is empty.'); }
     else json(fs.existsSync(queueFile) ? JSON.parse(fs.readFileSync(queueFile, 'utf8')) : []);
