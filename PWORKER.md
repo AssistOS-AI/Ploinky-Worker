@@ -4,7 +4,7 @@
 
 Node.js 22.13 or newer is required. From this directory, run `npm link` and then `pworker`. Without installation, run `node bin/pworker.mjs`.
 
-The [illustrated overview](docs/index.html) explains use cases, concepts, prompt batching, and how the approach could support GPU batching with a compatible local inference server. Run `pworker --help` for a complete command and option reference; help does not start the proxy or write user configuration.
+The [HTML documentation](docs/index.html) has separate pages for [concepts](docs/concepts.html), [batching](docs/batching.html), and the [CLI guide](docs/guide.html). Run `pworker --help` for a complete command and option reference; help does not start the proxy or write user configuration.
 
 ## Configuration
 

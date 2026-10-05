@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Install, configure, and use the Ploinky Workers CLI and library."><title>CLI guide — Ploinky Workers</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="topbar"><div class="wrap nav"><a class="brand" href="index.html"><span class="mark" aria-hidden="true">↗</span>Ploinky Workers</a><nav class="navlinks" aria-label="Main navigation"><a href="concepts.html">Concepts</a><a href="batching.html">Batching</a><a href="guide.html" aria-current="page">CLI guide</a><a href="#install">Install</a></nav></div></header>
+<main class="wrap">
+  <div class="pagehead"><span class="eyebrow">CLI and library guide</span><h1>Install it. Connect a model. Run a task.</h1><p><code>pworker</code> is the single program. It provides an interactive CLI and manages an independent local proxy process.</p></div>
+  <div class="layout"><article class="prose">
+    <section id="install">
+      <h2>Install from GitHub</h2>
+      <p>Use Node.js 22.13 or newer. Clone the open source repository, then link the CLI locally:</p>
+      <div class="codebox"><div class="terminalhead">terminal</div><pre><code>git clone https://github.com/AssistOS-AI/Ploinky-Worker.git
+cd Ploinky-Worker
+npm link
+pworker</code></pre></div>
+      <p><code>pworker</code> opens the interactive menu and starts the local proxy on first use. If you do not want to link the command, run <code>node bin/pworker.mjs</code> from the repository. Run <code>pworker --help</code> to see the complete CLI reference without starting the proxy.</p>
+      <div class="callout"><h3>Open source edition</h3><p>Ploinky Workers is the open source part of more sophisticated internal Axiologic tooling. The open source edition is usable on its own. Axiologic can customize workflows, provider setups, batching, and local inference for particular use cases; more public features will be added gradually.</p></div>
+    </section>
+    <section id="configure">
+      <h2>Connect a provider and configure a tier</h2>
+      <ol><li>Choose <strong>Log in / connect provider</strong> in the menu.</li><li>Enter a key for a built-in provider, add an OpenAI-compatible endpoint with an optional key, or start a configured local model.</li><li>After the live model catalog responds, choose <strong>Configure tier</strong>. Pick a tier, provider, and model from the searchable live list.</li><li>Review the batching setting and confirm the tier mapping.</li></ol>
+      <p>Use ↑/↓ and Enter to navigate. Esc or <strong>Back / Cancel</strong> leaves a step. Tier setup is shown only when a provider is connected. Credentials are stored after a successful connection check; a tier mapping is stored only after its final confirmation.</p>
+      <p>Built-in providers include <code>openference</code>, <code>openai</code>, <code>zai</code>, <code>deepseek</code>, <code>grok</code>, and <code>openrouter</code>, alongside configured local models. The logical tiers are <code>nano</code>, <code>micro</code>, <code>tiny</code>, <code>small</code>, <code>medium</code>, <code>good</code>, and <code>best</code>; <code>supertiny</code> is an alias.</p>
+      <div class="codebox"><div class="terminalhead">noninteractive configuration</div><pre><code>pworker provider myapi --endpoint https://example.com/v1 --key KEY --rpm 30
+pworker tier small --provider myapi --model MODEL_ID --batch
+pworker models
+pworker models start LOCAL_NAME
+pworker models stop LOCAL_NAME</code></pre></div>
+      <p>The provider and tier commands validate the live model list. <code>--rpm</code> is the provider's maximum requests per minute. Passing <code>--key</code> on a command line may leave it in shell history; the interactive key field is masked.</p>
+    </section>
+    <section id="run">
+      <h2>Run and queue tasks</h2>
+      <p><code>TASK</code> can be a <code>.mjs</code> file, a text request, or <code>-</code> to read a request from standard input. <code>--input</code> supplies the start-phase value. JSON objects become named task variables; other values become <code>$input</code>. A text request is compiled and cached as a task file.</p>
+      <div class="codebox"><div class="terminalhead">commands</div><pre><code>pworker run ./task.mjs --input '{"input":"hello"}'
+pworker run 'Summarize the supplied text' --input 'Meeting notes...'
+pworker run - --input 'hello' &lt; request.txt
+
+pworker queue ./task.mjs --input first --cwd ./project
+pworker queue ./task.mjs --input second --cwd ./project
+pworker queue list
+pworker flush
+pworker queue clear</code></pre></div>
+      <p><code>queue</code> stores work without executing it. <code>flush</code> explicitly sends the accumulated tasks and retains failed entries. Compatible phases can be combined into one model prompt when batching is enabled for their tier. <a href="batching.html">Read the batching rules</a>.</p>
+    </section>
+    <section id="status">
+      <h2>Return an ID and check progress</h2>
+      <div class="codebox"><div class="terminalhead">background tasks</div><pre><code>pworker run ./task.mjs --input hello --cwd ./project --async
+pworker --status
+pworker --status TASK_ID
+pworker flush --async</code></pre></div>
+      <p><code>--async</code> returns immediately with a task ID. <code>--status</code> lists detached tasks; <code>--status TASK_ID</code> shows one task's state, current phase, result, or error. States include queued, compiling, running, completed, and failed. Status remains available after the caller exits. <code>flush --async</code> gives each queued task an ID and runs the group in one detached worker.</p>
+    </section>
+    <section id="workspace">
+      <h2>Working directory and file methods</h2>
+      <p>The caller supplies the exact directory through <code>--cwd DIR</code>, <code>--current-working-directory DIR</code>, or <code>currentWorkingDirectory</code> in the input object. The task sees <code>this.currentWorkingDirectory</code>. Ploinky Workers does not choose or create a per-task subdirectory.</p>
+      <p>Phase code may call <code>this.readFile(path)</code>, <code>this.writeFile(path, text)</code>, <code>this.listFiles(path, recursive)</code>, <code>this.moveFile(from, to)</code>, <code>this.makeDirectory(path)</code>, and <code>this.removeFile(path)</code>. Paths are confined to the supplied directory, including after symlink resolution. Writes to <code>.git</code>, <code>.pworker</code>, and <code>.agents</code> are refused. File size and total write limits apply.</p>
+    </section>
+    <section id="proxy">
+      <h2>Proxy, storage, and monitoring</h2>
+      <div class="codebox"><div class="terminalhead">proxy commands</div><pre><code>pworker start
+pworker stats
+pworker stop
+pworker serve --host 127.0.0.1 --port 18080</code></pre></div>
+      <p>The proxy is independent of the interactive CLI. It listens on <code>http://127.0.0.1:18080</code> by default. The proxy exposes chat completions, model lists, health, and statistics. It records request counts, byte totals, cache hits, and provider limits. Identical complete requests to the same effective model can be served from cache.</p>
+      <p>User settings and runtime data live in <code>~/.pworker/</code> or <code>PWORKER_HOME</code>. API keys are stored in private files under <code>keys/</code>; task files, jobs, request logs, and response cache have separate directories. <code>PWORKER_PORT</code>, <code>PWORKER_URL</code>, <code>PWORKER_CONFIG</code>, and <code>PWORKER_TOKEN</code> adjust the proxy and client environment.</p>
+    </section>
+    <section id="library">
+      <h2>Use the library</h2>
+      <p>The library collects tasks and sends them through an explicit <code>flush()</code> call. The same phase format and tier configuration apply.</p>
+      <div class="codebox"><div class="terminalhead">JavaScript</div><pre><code>import { Pworker } from 'pworker';
+import { createPworkerClient } from 'pworker/client';
+
+const worker = new Pworker({
+  client: createPworkerClient({ purpose: 'my-batch' }),
+  config: { batching: { small: { enabled: true } } }
+});
+worker.enqueue(task, { input: 'one' });
+worker.enqueue(task, { input: 'two' });
+const results = await worker.flush();</code></pre></div>
+      <p><a href="concepts.html">Understand the task format</a> or <a href="batching.html">check when requests can be combined</a>.</p>
+    </section>
+  </article><aside class="side" aria-label="On this page"><strong>On this page</strong><a href="#install">Install</a><a href="#configure">Providers and tiers</a><a href="#run">Run and queue</a><a href="#status">Async and status</a><a href="#workspace">Working directory</a><a href="#proxy">Proxy and monitoring</a><a href="#library">Library</a></aside></div>
+</main>
+<footer><div class="wrap"><span>© Ploinky Workers · Open source edition</span><div><a href="index.html">Overview</a><a href="concepts.html">Concepts</a><a href="batching.html">Batching</a></div></div></footer>
+</body></html>

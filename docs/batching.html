@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Prompt batching in Ploinky Workers and how the approach can support GPU batching."><title>Batching — Ploinky Workers</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="topbar"><div class="wrap nav"><a class="brand" href="index.html"><span class="mark" aria-hidden="true">↗</span>Ploinky Workers</a><nav class="navlinks" aria-label="Main navigation"><a href="concepts.html">Concepts</a><a href="batching.html" aria-current="page">Batching</a><a href="guide.html">CLI guide</a><a href="guide.html#install">Install</a></nav></div></header>
+<main class="wrap">
+  <div class="pagehead"><span class="eyebrow">Optional optimization</span><h1>Combine requests. Keep tasks separate.</h1><p>When several tasks reach the same eligible phase, Ploinky Workers can place their inputs into one model prompt, identify each item, and send each answer back to its own task.</p></div>
+  <div class="layout"><article class="prose">
+    <section id="example">
+      <h2>A concrete example</h2>
+      <p>Three independent records need classification. Ordinarily, each phase sends its prompt separately. With prompt batching enabled, the shared instruction appears once and the inputs travel as a list with IDs. The model is asked to return a JSON result map keyed by those IDs.</p>
+      <div class="flow" aria-label="Batching flow">
+        <div class="node"><small>QUEUE</small><strong>3 tasks</strong><span>Each has its own input, variables, and result.</span></div>
+        <div class="node"><small>REQUEST</small><strong>1 prompt</strong><span>Shared instruction plus ID-tagged inputs.</span></div>
+        <div class="node"><small>DISPATCH</small><strong>3 answers</strong><span>Each result resumes its original task.</span></div>
+      </div>
+      <p>A single item uses an ordinary request. Batching does not merge task state or make one task depend on another.</p>
+    </section>
+    <section id="rules">
+      <h2>When batching is allowed</h2>
+      <p>Both the tier and the phase must opt in. The phase template must contain exactly one <code>$variable</code>, at its very end. This lets Ploinky Workers send the prompt prefix once, then append different inputs without duplicating the instruction.</p>
+      <div class="codebox"><div class="terminalhead">eligible phase</div><pre><code>export default {
+  begin: {
+    tier: 'small',
+    template: 'Classify this text: $input',
+    batch: true,
+    code: 'this.end(result)'
+  }
+};</code></pre></div>
+      <div class="codebox"><div class="terminalhead">configure and submit</div><pre><code>pworker tier small --provider myapi --model MODEL_ID --batch
+pworker queue ./classify.mjs --input first
+pworker queue ./classify.mjs --input second
+pworker flush --async</code></pre></div>
+      <p>Tasks also need to reach the same phase at the same time and share the tier, prompt prefix, phase code, and transition. The response must contain a valid JSON result for every submitted ID. A malformed response or missing ID fails the affected group.</p>
+      <div class="callout"><h3>Useful boundary</h3><p>Use batching for independent requests when the chosen model reliably returns structured JSON. It can reduce the number of provider requests, but it does not guarantee fewer tokens, lower cost, or lower latency. This is prompt aggregation, not a provider's asynchronous Batch API.</p></div>
+    </section>
+    <section id="gpu">
+      <h2>How this relates to GPU batching</h2>
+      <p>The queue, tier routing, and ID-based result dispatch provide a useful foundation for GPU batching: many independent pieces of work can be collected and associated with their outputs. A compatible local inference server or scheduler could consume that stream and batch model execution on the GPU.</p>
+      <p>The current feature packs inputs into one model prompt. Actual GPU execution batching is performed by the local server and depends on its model, scheduler, and configuration. The two techniques can be used separately or together where the server supports it.</p>
+      <p>For specialized deployments, Axiologic offers consulting and customization of local inference setups, batching strategies, and task flows. Ploinky Workers is the open source edition; more capabilities will be added gradually.</p>
+      <div class="actions"><a class="button secondary" href="guide.html#run">CLI queue commands →</a><a class="button secondary" href="concepts.html">Task concepts →</a></div>
+    </section>
+  </article><aside class="side" aria-label="On this page"><strong>On this page</strong><a href="#example">Example</a><a href="#rules">Eligibility rules</a><a href="#gpu">GPU batching</a></aside></div>
+</main>
+<footer><div class="wrap"><span>© Ploinky Workers · Open source edition</span><div><a href="index.html">Overview</a><a href="concepts.html">Concepts</a><a href="guide.html">CLI guide</a></div></div></footer>
+</body></html>

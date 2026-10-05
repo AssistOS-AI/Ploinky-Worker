@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="How Ploinky Workers tasks, phases, tiers, inputs, and the proxy fit together."><title>Concepts — Ploinky Workers</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="topbar"><div class="wrap nav"><a class="brand" href="index.html"><span class="mark" aria-hidden="true">↗</span>Ploinky Workers</a><nav class="navlinks" aria-label="Main navigation"><a href="concepts.html" aria-current="page">Concepts</a><a href="batching.html">Batching</a><a href="guide.html">CLI guide</a><a href="guide.html#install">Install</a></nav></div></header>
+<main class="wrap">
+  <div class="pagehead"><span class="eyebrow">Concepts</span><h1>One task, a few explicit steps.</h1><p>A Ploinky Workers task says what to do at each phase and where to go next. Execution follows that file. The model is selected through a configured tier.</p></div>
+  <div class="layout"><article class="prose">
+    <section id="picture">
+      <h2>The whole picture</h2>
+      <p>Suppose you want to extract a title from a piece of text and save it. The caller supplies the text and a working directory. The first phase asks a model for the title. The second phase writes a file and returns the result.</p>
+      <div class="flow" aria-label="Task execution flow">
+        <div class="node"><small>INPUT</small><strong>Task + data</strong><span>The caller supplies a .mjs file or text request, plus input and an optional directory.</span></div>
+        <div class="node"><small>PHASE</small><strong>Model or code</strong><span>A tier routes a prompt to a model; a null tier runs code without a model.</span></div>
+        <div class="node"><small>OUTPUT</small><strong>Result + status</strong><span>The task ends with a value. Detached tasks also retain their phase and result by ID.</span></div>
+      </div>
+      <p>The local proxy sits between model phases and providers. It resolves the tier, applies request limits, records traffic, and can serve an identical model request from cache.</p>
+    </section>
+    <section id="file">
+      <h2>A task file you can read</h2>
+      <p>A task is a JavaScript module exporting an object of named phases. Its shape is JSON-like; the <code>.mjs</code> format also allows JavaScript functions. This example uses code strings, which work for generated and handwritten tasks.</p>
+      <div class="codebox"><div class="terminalhead">save-title.mjs</div><pre><code>export default {
+  begin: {
+    tier: 'tiny',
+    template: 'Return a short title for: $input',
+    code: 'this.title = result; this.next("save")'
+  },
+  save: {
+    tier: null,
+    code: 'await this.writeFile("title.txt", this.title); this.end({ title: this.title })'
+  }
+};</code></pre></div>
+      <p>Run it with <code>pworker run ./save-title.mjs --input 'A report about rainfall' --cwd ./project</code>. The first phase substitutes <code>$input</code> into the prompt. Its code stores the model answer and calls <code>this.next("save")</code>. The second phase uses no model, writes under the caller's directory, and calls <code>this.end(...)</code>.</p>
+      <p>Each task has its own variables. <code>this.next(name)</code> selects the next phase; <code>this.end(value)</code> completes it. Phase code can transform results between model calls. Execution has a 100-phase limit.</p>
+    </section>
+    <section id="tiers">
+      <h2>Tiers choose models</h2>
+      <p>The task says <code>tiny</code>, not a provider-specific model ID. In configuration, that tier points to a provider and model. Available tiers include <code>nano</code>, <code>micro</code>, <code>tiny</code>, <code>small</code>, <code>medium</code>, <code>good</code>, and <code>best</code>, with <code>supertiny</code> as an alias. A tier can also have fallback entries.</p>
+      <p>Connect a provider in the interactive CLI first. Then choose a tier and select a model from the provider's live model catalog. A configured local model or an OpenAI-compatible endpoint can be a provider too.</p>
+    </section>
+    <section id="text">
+      <h2>Start from a request or a file</h2>
+      <p>Pass an existing <code>.mjs</code> task for repeatable, reviewable work. Or pass a natural-language request: Ploinky Workers asks the configured <code>good</code> tier to compile it into a task file and caches that file in the user home. The same request can reuse the compiled task.</p>
+      <div class="codebox"><div class="terminalhead">two ways to run</div><pre><code>pworker run ./save-title.mjs --input 'A report'
+pworker run 'Create a short title from the input' --input 'A report'</code></pre></div>
+      <p>Model-free task files can run without an available provider. Compiling a text request requires one. Locally supplied modules are imported as JavaScript, so review task files you did not write.</p>
+    </section>
+    <section id="directory">
+      <h2>The caller owns the directory</h2>
+      <p><code>--cwd DIR</code> gives a task the exact directory chosen by its caller. Ploinky Workers does not create a task-specific subdirectory. Phase code can use confined methods such as <code>this.readFile()</code>, <code>this.writeFile()</code>, and <code>this.listFiles()</code>. Paths must stay inside that directory. If two tasks receive the same directory, they can access the same files, while their in-memory task variables remain separate.</p>
+      <div class="actions"><a class="button secondary" href="guide.html#workspace">File operation details →</a><a class="button secondary" href="batching.html">Next: batching →</a></div>
+    </section>
+  </article><aside class="side" aria-label="On this page"><strong>On this page</strong><a href="#picture">The whole picture</a><a href="#file">Task file</a><a href="#tiers">Tiers</a><a href="#text">Request or file</a><a href="#directory">Working directory</a></aside></div>
+</main>
+<footer><div class="wrap"><span>© Ploinky Workers · Open source edition</span><div><a href="index.html">Overview</a><a href="batching.html">Batching</a><a href="guide.html">CLI guide</a></div></div></footer>
+</body></html>
