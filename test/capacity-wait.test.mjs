@@ -97,3 +97,15 @@ test('HTTP cancellation removes a waiting task and prevents restart recovery',as
     const saved=server.ops.store.read(row.id);assert.equal(saved.checkpoint,null);assert.equal(saved.status,'cancelled');
   }finally{await server.close();fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('checkpoint recovery takes the working directory from the task record, never from saved phase state',async()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'pworker-ckpt-cwd-'));
+  try{
+    const task={begin:{tier:null,code:'this.end(this.currentWorkingDirectory ?? null)'}};
+    const worker=new Pworker({client:{chat:async()=>({ok:true,text:''})}});
+    worker.enqueue(task,{},{id:'a',checkpoint:{phase:'begin',state:{currentWorkingDirectory:'/etc'},steps:0}});
+    worker.enqueue(task,{},{id:'b',currentWorkingDirectory:root,checkpoint:{phase:'begin',state:{currentWorkingDirectory:'/etc'},steps:0}});
+    const [a,b]=await worker.flush();
+    assert.equal(a.value,null);assert.equal(b.value,fs.realpathSync(root));
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
