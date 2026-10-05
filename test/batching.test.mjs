@@ -3,7 +3,7 @@
 import './home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Pworker, validateTask, batchPrompt } from '../lib/pworker/task.mjs';
+import { Pworker, validateTask, batchPrompt, batchResults } from '../lib/pworker/task.mjs';
 
 const answer = (o) => { const requests = JSON.parse(o.prompt.slice(o.prompt.lastIndexOf('\n') + 1)); return { ok: true, status: 200, json: { results: Object.fromEntries(requests.map((r) => [r.id, String(r.input).toUpperCase()])) } }; };
 
@@ -53,6 +53,27 @@ test('maxItems bounds a batch; an invalid envelope is split in halves; a missing
   assert.equal(results.filter((r) => r.value.startsWith('X ')).length, 1);
   assert.deepEqual(sizes.slice(0, 2).sort(), [2, 4]);
   assert.ok(w.batchStats.splits >= 2);
+});
+
+test('an array of results that carry their ids is accepted without splitting', async () => {
+  const calls = [];
+  const client = { json: async (o) => {
+    calls.push(o);
+    const requests = JSON.parse(o.prompt.slice(o.prompt.lastIndexOf('\n') + 1));
+    return { ok: true, status: 200, json: { results: requests.map((r, i) => i % 2 ? { id: r.id, result: r.input.toUpperCase() } : { id: r.id, verdict: r.input }) } };
+  } };
+  const w = new Pworker({ client, config: { batching: { small: { enabled: true } } } });
+  for (let i = 0; i < 4; i++) w.enqueue({ begin: { tier: 'small', batch: true, template: 'x $input' } }, `v${i}`);
+  const results = await w.flush();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(results.map((r) => r.value), [{ verdict: 'v0' }, 'V1', { verdict: 'v2' }, 'V3']);
+  assert.deepEqual(w.batchStats, { requests: 1, items: 4, saved: 3, splits: 0 });
+  assert.match(calls[0].prompt, /\{"results":\{"<request id>":<result>\}\}/);
+});
+
+test('batchResults rejects arrays without distinct string ids', () => {
+  for (const bad of [[{ id: 'a' }, { id: 'a' }], [{ x: 1 }], ['a'], [[1]]]) assert.ok(Array.isArray(batchResults(bad)));
+  assert.deepEqual(batchResults({ a: 1 }), { a: 1 });
 });
 
 test('a batch request that fails outright fails its members without splitting', async () => {
