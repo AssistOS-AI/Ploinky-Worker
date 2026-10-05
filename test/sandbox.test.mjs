@@ -1,5 +1,6 @@
 // The sandbox of model-written task phases (programs written on the fly): the allow-listed API works; escape attempts, code generation, unknown operations, endless
 // loops and memory bombs are refused or stopped.
+import './home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runProgram } from '../lib/sandbox.mjs';

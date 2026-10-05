@@ -1,5 +1,6 @@
 // Priority classes and duration caps of the core: background work runs only when nothing else waits and only within its share of
 // the rate and plan limits (held, never refused); a request that exceeds its duration cap is cut, reported and falls back.
+import './home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';

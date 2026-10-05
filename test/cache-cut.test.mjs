@@ -1,5 +1,6 @@
 // Cut and interrupted answers are never cached or replayed; a fallback model gets its chain entry's own request fields (reasoning off,
 // a token floor); the library's cache setting works per client and per call (use, strict, record, off).
+import './home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';

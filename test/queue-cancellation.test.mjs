@@ -1,3 +1,4 @@
+import './home.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Limiter} from '../lib/limiter.mjs';

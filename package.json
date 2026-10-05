@@ -7,6 +7,6 @@
   "engines": {"node": ">=22.13"},
   "bin": {"pworker": "./bin/pworker.mjs"},
   "exports": {".": "./lib/pworker/task.mjs", "./client": "./lib/client.mjs", "./server": "./lib/server.mjs"},
-  "scripts": {"start": "node bin/pworker.mjs", "serve": "node bin/pworker.mjs serve", "test": "node --test test/*.test.mjs"},
+  "scripts": {"start": "node bin/pworker.mjs", "serve": "node bin/pworker.mjs serve", "test": "node --import ./test/home.mjs --test test/*.test.mjs"},
   "dependencies": {}
 }
