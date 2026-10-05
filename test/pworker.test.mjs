@@ -44,7 +44,7 @@ test('explicit flush combines eligible tasks and dispatches results by id', asyn
   assert.throws(() => validateTask({ begin: { tier: 'tiny', batch: true, template: '$a and $b' } }), /batch/);
 });
 
-test('a text task is compiled to a reusable mjs file in the user home', async () => {
+test('a text task is compiled to a reusable JSON declaration in the user home', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-task-'));
   let calls = 0;
   const client = { json: async () => { calls++; return { ok: true, json: { begin: { tier: null, code: 'this.end(this.input)' } } }; } };
@@ -52,6 +52,7 @@ test('a text task is compiled to a reusable mjs file in the user home', async ()
     const first = await compileTask('echo input', { client, home });
     const second = await compileTask('echo input', { client, home });
     assert.equal(first.file, second.file);
+    assert.ok(first.file.endsWith('.json'));
     assert.equal(second.cached, true);
     assert.equal(calls, 1);
     assert.deepEqual(await loadTask(first.file), first.task);
@@ -102,7 +103,7 @@ test('CLI --async returns an ID and --status retrieves the finished result', { t
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-async-'));
   const home = path.join(root, 'home'), work = path.join(root, 'work'), file = path.join(root, 'task.mjs');
   fs.mkdirSync(work);
-  fs.writeFileSync(file, 'export default { begin: { tier: null, code: \'await this.writeFile("answer.txt", this.input); this.end(await this.readFile("answer.txt"))\' } };\n');
+  fs.writeFileSync(file, 'export default '+JSON.stringify({begin:{tier:null,code:'await this.writeFile("answer.txt", this.input); this.end(await this.readFile("answer.txt"))'}})+';\n');
   const socket = net.createServer();
   await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
   const port = socket.address().port;

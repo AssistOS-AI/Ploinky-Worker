@@ -10,7 +10,7 @@
       <h2>The whole picture</h2>
       <p>Suppose you want to extract a title from a piece of text and save it. The caller supplies the text and a working directory. The first phase asks a model for the title. The second phase writes a file and returns the result.</p>
       <div class="flow" aria-label="Task execution flow">
-        <div class="node"><small>INPUT</small><strong>Task + data</strong><span>The caller supplies a .mjs file or text request, plus input and an optional directory.</span></div>
+        <div class="node"><small>INPUT</small><strong>Task + data</strong><span>The caller supplies a .json file or text request, plus input and an optional directory.</span></div>
         <div class="node"><small>PHASE</small><strong>Model or code</strong><span>A tier routes a prompt to a model; a null tier runs code without a model.</span></div>
         <div class="node"><small>OUTPUT</small><strong>Result + status</strong><span>The task ends with a value. Detached tasks also retain their phase and result by ID.</span></div>
       </div>
@@ -18,19 +18,19 @@
     </section>
     <section id="file">
       <h2>A task file you can read</h2>
-      <p>A task is a JavaScript module exporting an object of named phases. Its shape is JSON-like; the <code>.mjs</code> format also allows JavaScript functions. This example uses code strings, which work for generated and handwritten tasks.</p>
-      <div class="codebox"><div class="terminalhead">save-title.mjs</div><pre><code>export default {
-  begin: {
-    tier: 'tiny',
-    template: 'Return a short title for: $input',
-    code: 'this.title = result; this.next("save")'
+      <p>A task is a strict JSON object of named phases, starting at <code>begin</code>. Functions, lambdas, executable modules and wrapped task definitions are rejected. Phase <code>code</code> contains statement strings executed in the confined phase sandbox. A static <code>.mjs</code> declaration may contain only <code>export default</code> followed by strict JSON; it is parsed, never imported.</p>
+      <div class="codebox"><div class="terminalhead">save-title.json</div><pre><code>{
+  "begin": {
+    "tier": "tiny",
+    "template": "Return a short title for: $input",
+    "code": "this.title = result; this.next(\"save\")"
   },
-  save: {
-    tier: null,
-    code: 'await this.writeFile("title.txt", this.title); this.end({ title: this.title })'
+  "save": {
+    "tier": null,
+    "code": "await this.writeFile(\"title.txt\", this.title); this.end({ title: this.title })"
   }
-};</code></pre></div>
-      <p>Run it with <code>pworker run ./save-title.mjs --input 'A report about rainfall' --cwd ./project</code>. The first phase substitutes <code>$input</code> into the prompt. Its code stores the model answer and calls <code>this.next("save")</code>. The second phase uses no model, writes under the caller's directory, and calls <code>this.end(...)</code>.</p>
+}</code></pre></div>
+      <p>Run it with <code>pworker run ./save-title.json --input 'A report about rainfall' --cwd ./project</code>. The first phase substitutes <code>$input</code> into the prompt. Its code stores the model answer and calls <code>this.next("save")</code>. The second phase uses no model, writes under the caller's directory, and calls <code>this.end(...)</code>.</p>
       <p>Each task has its own variables. <code>this.next(name)</code> selects the next phase; <code>this.end(value)</code> completes it. Phase code can transform results between model calls. Execution has a 100-phase limit.</p>
     </section>
     <section id="tiers">
@@ -40,10 +40,10 @@
     </section>
     <section id="text">
       <h2>Start from a request or a file</h2>
-      <p>Pass an existing <code>.mjs</code> task for repeatable, reviewable work. Or pass a natural-language request: Ploinky Workers asks the configured <code>good</code> tier to compile it into a task file and caches that file in the user home. The same request can reuse the compiled task.</p>
-      <div class="codebox"><div class="terminalhead">two ways to run</div><pre><code>pworker run ./save-title.mjs --input 'A report'
+      <p>Pass an existing <code>.json</code> task for repeatable, reviewable work. Or pass a natural-language request: Ploinky Workers asks the configured <code>good</code> tier to compile it into a task file and caches that file in the user home. The same request can reuse the compiled task.</p>
+      <div class="codebox"><div class="terminalhead">two ways to run</div><pre><code>pworker run ./save-title.json --input 'A report'
 pworker run 'Create a short title from the input' --input 'A report'</code></pre></div>
-      <p>Model-free task files can run without an available provider. Compiling a text request requires one. Locally supplied modules are imported as JavaScript, so review task files you did not write.</p>
+      <p>Model-free task files can run without an available provider. Compiling a text request requires one and produces the same validated JSON phase map. No task file is imported or evaluated as a module. Review phase statements before granting them access to a working directory.</p>
     </section>
     <section id="directory">
       <h2>The caller owns the directory</h2>

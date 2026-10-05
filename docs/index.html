@@ -27,7 +27,7 @@
 <span class="prompt">$</span> pworker
 
 <span class="comment"># Start work and get a task ID</span>
-<span class="prompt">$</span> pworker run ./extract.mjs \
+<span class="prompt">$</span> pworker run ./extract.json \
     --input '{"input":"report.txt"}' \
     --cwd ./project --async
 { "id": <span class="accent">"9f3…"</span>, "status": "queued" }
@@ -36,7 +36,7 @@
 <span class="prompt">$</span> pworker --status 9f3…</pre>
     </div>
   </div>
-  <div class="band"><div class="wrap"><div><strong>Explicit phases</strong><span>Reviewable .mjs task files</span></div><div><strong>Model tiers</strong><span>Choose the provider separately</span></div><div><strong>Background work</strong><span>IDs, phase status, persisted results</span></div><div><strong>Optional batching</strong><span>Combine eligible requests</span></div></div></div>
+  <div class="band"><div class="wrap"><div><strong>Explicit phases</strong><span>Reviewable JSON task files</span></div><div><strong>Model tiers</strong><span>Choose the provider separately</span></div><div><strong>Background work</strong><span>IDs, phase status, persisted results</span></div><div><strong>Optional batching</strong><span>Combine eligible requests</span></div></div></div>
   <section class="wrap">
     <div class="sectionintro"><span class="eyebrow">Use cases</span><h2>For repeatable work with changing inputs.</h2><p>Describe the processing steps once, then run them against many requests or files.</p></div>
     <div class="cards">

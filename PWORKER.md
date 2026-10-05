@@ -38,24 +38,28 @@ The proxy listens at `http://127.0.0.1:18080` by default and serves `/v1/chat/co
 
 ## Task files
 
-A `.mjs` file exports an object containing phases. JSON cannot contain functions, so `code` can be a JavaScript string or, in a manually written module, a function. For a text request, the compiler writes a `.mjs` module with string-valued code to `~/.pworker/tasks/<sha256>.mjs`; an identical request reuses that file. Local modules are imported as JavaScript and must be trusted. Each phase's code runs separately in the sandbox without access to `process`, unrestricted file APIs, or the network. Confined file operations are available when a working directory is supplied.
+A task is a direct JSON object of phases, starting at `begin`. Only this format executes. Use a `.json` file; a `.mjs` declaration is accepted only when its complete contents are `export default ` followed by strict JSON and an optional semicolon. Task files are read as data, never imported or evaluated. Imports, factories, functions, lambda-valued phases, function-form `code` strings, wrappers such as `{start, phases}`, accessors, unsupported fields and non-JSON values are rejected. `code`, if present, must be a JavaScript statement string; it executes only inside the confined phase sandbox. Ordinary callbacks inside that statement block do not define tasks.
 
-```js
-export default {
-  begin: {
-    tier: 'tiny',
-    template: 'Convert to uppercase: $input',
-    code: 'this.upper = result; this.next("finish")'
+The text-request compiler produces the same validated phase map as `.json` under `~/.pworker/tasks/`, using a versioned cache identity. It never executes natural-language instructions directly or falls back to the retired runtime. Cached legacy modules are not reused. No files in the user's old caches are deleted automatically.
+
+```json
+{
+  "begin": {
+    "tier": "tiny",
+    "template": "Convert to uppercase: $input",
+    "code": "this.upper = result; this.next('finish')"
   },
-  finish: {
-    tier: null,
-    template: '',
-    code: 'this.end({ original: this.input, upper: this.upper })'
+  "finish": {
+    "tier": null,
+    "template": "",
+    "code": "this.end({ original: this.input, upper: this.upper })"
   }
-};
+}
 ```
 
-`pworker run ./task.mjs --input 'hello'` executes a task file immediately. `pworker run 'a natural-language task' --input 'hello'` compiles and executes a text request. `pworker run - --input ...` reads the request from stdin. `this.next("phase")` selects the next phase, `this.end(value)` finishes the task, and `this.name = value` preserves a variable for subsequent phases. A final phase without `code` returns the model's answer. Execution is capped at 100 phases per task.
+`pworker run ./task.json --input 'hello'` executes a task file immediately. `pworker run 'a natural-language task' --input 'hello'` compiles and validates a declaration before execution. `pworker run - --input ...` reads the request from stdin. `this.next("phase")` selects the next phase, `this.end(value)` finishes the task, and `this.name = value` preserves a variable for subsequent phases. A final phase without `code` returns the model's answer. Execution is capped at 100 phases per task.
+
+The HTTP task endpoint is `POST /v1/tasks` with `{task: PHASE_MAP, input: {...}, currentWorkingDirectory: PATH_OR_NULL}`. `client.task(phaseMap, {input, currentWorkingDirectory, wait:false})` returns an ID; `client.waitOp(id)` and `client.op(id)` retrieve persisted phase-aware status and results. Legacy `/v1/lambdas`, `/v1/run`, `/v1/jobs` and `/v1/calls` APIs return HTTP 410. Their executors, dynamic task modules, planners and client execution methods have been removed. Provider/model proxy endpoints remain available to model phases.
 
 ## Detached execution and status
 
@@ -64,7 +68,7 @@ The interactive **New task conversation** is a text-mode composer. Each request 
 Add `--async` to return a task ID without waiting for task execution:
 
 ```sh
-pworker run ./task.mjs --input 'hello' --cwd /path/to/project --async
+pworker run ./task.json --input 'hello' --cwd /path/to/project --async
 pworker --status
 pworker --status TASK_ID
 ```
@@ -77,13 +81,13 @@ The caller chooses the exact directory with `--cwd DIR`, `--current-working-dire
 
 Phase code can use `await this.readFile(path)`, `await this.writeFile(path, text)`, `await this.listFiles(path, recursive)`, `await this.moveFile(from, to)`, `await this.makeDirectory(path)`, and `await this.removeFile(path)`. `writeFile` creates parent directories and can replace an existing file; `removeFile` removes a regular file. Paths must remain inside `currentWorkingDirectory`, including after resolving symlinks. Writes to `.git`, `.pworker`, and `.agents` are refused. File sizes and total writes are bounded by the workspace limits. These methods are unavailable when no working directory is supplied. For example:
 
-```js
-export default {
-  begin: {
-    tier: null,
-    code: 'await this.writeFile("result.txt", this.input); this.end(await this.readFile("result.txt"))'
+```json
+{
+  "begin": {
+    "tier": null,
+    "code": "await this.writeFile(\"result.txt\", this.input); this.end(await this.readFile(\"result.txt\"))"
   }
-};
+}
 ```
 
 The library accumulates tasks and sends them on an explicit call:
@@ -101,9 +105,11 @@ worker.enqueue(task, { input: 'two' });
 const results = await worker.flush();
 ```
 
-In the CLI, `pworker queue ./task.mjs --input one` and subsequent `queue` commands accumulate entries in `~/.pworker/queue.json`. `pworker flush` executes them and retains failed entries. Use `pworker queue list` and `pworker queue clear` to inspect or empty the queue.
+In the CLI, `pworker queue ./task.json --input one` and subsequent `queue` commands accumulate entries in `~/.pworker/queue.json`. `pworker flush` executes them and retains failed entries. Use `pworker queue list` and `pworker queue clear` to inspect or empty the queue.
 
 ## Batching within one model request
+
+A predefined phase can set `request: { maxTokens, temperature, cache, retryCut, cutCap, timeoutMs, noFallback }`. These options are forwarded to the model client for both ordinary and combined requests. Different request options do not share a batch. Positive token/time budgets, cache modes and boolean options are validated. Truncated responses fail the task even when they happen to parse; an extra or missing batch result ID fails the group. For reproducible calibration, use `cache: 'off'`, `retryCut: false` and `noFallback: true`, and record the actual served model. Provider transport retries are independent of token-cut retries.
 
 This batching mode combines prompts; it does not use a provider's asynchronous Batch API. It applies **only** when a phase has `batch: true`, its tier has `batching.<tier>.enabled: true`, and its template contains exactly one `$variable` at the very end. Tasks must reach the same phase at the same time and share the same tier, prompt prefix, phase code, and transition. Pworker sends that prefix once, followed by a JSON list of `{id,input}` entries, and asks for `{results:{id: result}}`. It routes each result back by ID, then advances the tasks independently. A group of one uses an ordinary request. A missing ID or malformed response fails the entire group. Use batching only when the model reliably returns JSON and requests have no dependencies on one another. It can reduce request count, but does not guarantee lower cost or latency.
 
@@ -111,4 +117,4 @@ Example: `{ tier: 'small', template: 'Classify this text: $input', batch: true, 
 
 ## Implementation status
 
-The executor is deterministic and does not plan agentic loops while running. Compiling a text request makes an LLM call on the `good` tier; without an available provider, compilation cannot run, while model-free `.mjs` tasks can run offline.
+The executor is deterministic and does not plan agentic loops while running. Compiling a text request makes an LLM call on the `good` tier; without an available provider, compilation cannot run, while model-free `.json` tasks can run offline.

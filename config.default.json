@@ -294,10 +294,30 @@
       }
     ],
     "supertiny": "micro",
-    "tiny": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
-    "small": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
-    "medium": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
-    "good": [{ "upstream": "local", "model": "Qwen3.6-35B-A3B" }],
+    "tiny": [
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "small": [
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "medium": [
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "good": [
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
     "best": [
       {
         "upstream": "local",
@@ -328,9 +348,9 @@
       "ingest",
       "job:*",
       "review:*",
-      "lambda:*",
       "run:*",
-      "test:*"
+      "test:*",
+      "pworker:*"
     ],
     "untaggedDailyMax": 100,
     "keepDays": 7
@@ -346,39 +366,6 @@
   "cache": {
     "defaultMode": "use"
   },
-  "runner": {
-    "_note": "The job runner (jobs, tasks, run-lambdas): run folders, the template library a task planner chooses from, roles (role -> tier), limits of planned tasks.",
-    "dataDir": "~/.pworker/runs",
-    "templatesDir": null,
-    "roles": {
-      "planner": "good",
-      "decider": "good",
-      "auditor": "medium",
-      "worker": "small",
-      "worker-short": "tiny"
-    },
-    "limits": {
-      "maxTaskUsd": 2,
-      "maxTaskCredits": 100,
-      "maxTaskCalls": 2000
-    },
-    "tasks": {
-      "keepDays": 7
-    }
-  },
-  "lambdas": {
-    "_note": "Internal task modules, project modules, and job folders.",
-    "project": [],
-    "jobs": {}
-  },
-  "calls": {
-    "_note": "Call records are stored under the Pworker home unless calls.dir is set.",
-    "dir": null,
-    "keepArtifactsDays": 30,
-    "jobItems": true,
-    "maxResultBytes": 1000000,
-    "maxInputs": 2000
-  },
   "run": {
     "budget": {
       "usd": 0.5,
@@ -386,35 +373,6 @@
       "calls": 300
     },
     "maxSteps": 5
-  },
-  "agent": {
-    "_note": "Internal planner settings.",
-    "lambdasDir": null,
-    "skillDirs": [],
-    "plannerTier": null,
-    "matchTier": "tiny",
-    "askTiers": null,
-    "maxRounds": 3,
-    "maxAsks": 30,
-    "maxToolCalls": 2000,
-    "timeMs": 120000,
-    "checkOnReuse": true,
-    "reusePure": true,
-    "budget": null,
-    "match": {
-      "k": 3,
-      "minScore": 0,
-      "grounded": true,
-      "maxTokens": 400,
-      "extraBody": {
-        "chat_template_kwargs": {
-          "enable_thinking": false
-        }
-      }
-    },
-    "planner": {
-      "maxTokens": 8000
-    }
   },
   "sandbox": {
     "timeMs": 120000,

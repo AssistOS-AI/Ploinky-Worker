@@ -54,8 +54,8 @@ async function restartProxy() { if (runningPid()) { await stopProxy(); await sta
 
 function publicJob(job) {
   if (!job) return null;
-  const { id, status, phase, steps, currentWorkingDirectory, createdAt, updatedAt, result, error } = job;
-  return { id, status, phase, steps, currentWorkingDirectory, createdAt, updatedAt, result, error };
+  const { id, status, phase, steps, currentWorkingDirectory, createdAt, updatedAt, result, error,waitingReason,retryAt } = job;
+  return { id, status, phase, steps, currentWorkingDirectory, createdAt, updatedAt, result, error,waitingReason,retryAt };
 }
 
 function startDetachedTasks(items) {
@@ -343,9 +343,9 @@ async function composeTasks(screen, currentWorkingDirectory) {
   for (;;) {
     const task = await promptChat(screen, 'New task conversation', transcript);
     if (task == null) return;
-    const request = task.endsWith('.mjs') && !path.isAbsolute(task) ? path.resolve(currentWorkingDirectory, task) : task;
+    const request = /\.(mjs|json)$/.test(task) && !path.isAbsolute(task) ? path.resolve(currentWorkingDirectory, task) : task;
     try {
-      const input = request.endsWith('.mjs') ? '' : task;
+      const input = /\.(mjs|json)$/.test(request) ? '' : task;
       const job = startDetachedTasks([{ request, input, currentWorkingDirectory }])[0];
       transcript.push({ role: 'user', text: task });
       transcript.push({ role: 'pworker', text: `Task ${job.id.slice(0, 8)} started (${job.status}). Add another request or press Esc to return. Open Current tasks to monitor phases and results.` });
@@ -361,7 +361,7 @@ async function currentTasks(screen, currentWorkingDirectory) {
   for (;;) {
     const jobs = store.list();
     const visible = jobs.slice(0, 10);
-    const active = jobs.filter((job) => ['queued', 'compiling', 'running'].includes(job.status)).length;
+    const active = jobs.filter((job) => ['queued', 'compiling', 'running','waiting'].includes(job.status)).length;
     const selected = await selectMenu(screen, `Current tasks · ${active} active · newest ${visible.length}/${jobs.length}\nWorking directory: ${currentWorkingDirectory}`, [
       { label: 'Refresh task list', value: 'refresh' },
       ...visible.map((job) => ({ label: taskLabel(job), value: `task:${job.id}` })),
@@ -469,7 +469,7 @@ async function main() {
   }
   if (command === 'run' || command === '--async' || command === 'queue') {
     const request = args[1] === '-' ? fs.readFileSync(0, 'utf8') : args[1];
-    if (!request) throw new Error('Usage: pworker run <file.mjs|request|-> [--input text|JSON]');
+    if (!request) throw new Error('Usage: pworker run <file.json|request|-> [--input text|JSON]');
     let input = option('input', ''); try { input = JSON.parse(input); } catch {}
     const currentWorkingDirectory = option('cwd', option('current-working-directory', null));
     if (command === 'queue') {
@@ -498,6 +498,6 @@ async function main() {
     fs.writeFileSync(queueFile, JSON.stringify(failed.map((r) => pending[results.findIndex((x) => x.id === r.id)]), null, 2) + '\n', { mode: 0o600 });
     json({ entries, results }); return;
   }
-  console.log('pworker [run <task.mjs|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
+  console.log('pworker [run <task.json|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
 }
 main().catch((e) => { console.error(e.message); process.exitCode = 1; });
