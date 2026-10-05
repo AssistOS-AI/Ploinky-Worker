@@ -103,3 +103,17 @@ test('an upstream status outside 200-599 rejects the fetch instead of crashing t
   try { await assert.rejects(httpFetch(`http://127.0.0.1:${server.address().port}/`), /fetch failed/); }
   finally { server.close(); }
 });
+
+test('/stats does not ask providers without keys for models, and a failed list is not asked again at once', async () => {
+  const seen = [];
+  const t = core({ upstreams: { a: { baseUrl: 'http://a.test', noKey: true }, k: { baseUrl: 'http://k.test', keyVar: 'NO_SUCH_KEY' } } }, async (url) => { seen.push(url); throw new TypeError('fetch failed'); });
+  for (let i = 0; i < 3; i++) assert.equal((await t.fetch('http://pworker.local/stats')).status, 200);
+  assert.deepEqual(seen, ['http://a.test/v1/models']);
+});
+
+test('prompted template fill and relation lookup ignore inherited properties', async () => {
+  const { fill, validateStructure } = await import('../lib/prompted.mjs');
+  assert.throws(() => fill('{{constructor}}', {}), /no value/);
+  const v = validateStructure(JSON.stringify({ spans: [{ label: 'person', text: 'Ana' }], relations: [{ type: 'toString', head: 'Ana', tail: 'Ana' }] }), { text: 'Ana', entities: ['person'], relations: { knows: {} } });
+  assert.equal(v.relations.length, 0); assert.equal(v.dropped, 1);
+});

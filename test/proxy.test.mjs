@@ -717,3 +717,29 @@ test('prompted tiers: the re-ask keeps the better-formed reply and fills what it
   assert.deepEqual(r.body.results.map((x) => x.candidates), [['Value(ana, 12)'], ['Value(ben, 3)'], ['Value(all, add(ana, ben))\n? Ask(all)']]);
   assert.equal(r.body.unresolved, 0);
 });
+
+test('local: the idle stop never stops a server with requests in flight or queued', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { createLocalStarter } = await import('../lib/local.mjs');
+  let running = false, kills = 0, busy = true;
+  const spawn = () => { const c = new EventEmitter(); c.exitCode = null; c.pid = 1; c.kill = () => { kills += 1; running = false; c.exitCode = 0; setTimeout(() => c.emit('exit', 0), 1); }; running = true; return c; };
+  const logDir = mkdtempSync(join(tmpdir(), 'pworker-idle-'));
+  const st = createLocalStarter({ name: 'x', baseUrl: 'http://127.0.0.1:1903', start: { bin: '/bin/true', gguf: '/etc/hostname', requireFreeGpu: false, idleStopMs: 30, logFile: join(logDir, 'x.log') } },
+    { spawn, fetchImpl: async () => ({ ok: running }), gpuPids: () => [], busy: () => busy });
+  try {
+    running = false;
+    assert.equal(await st.ensure(), true);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(kills, 0, 'a busy server is not stopped');
+    busy = false;
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(kills, 1, 'an idle server is stopped');
+  } finally { await st.stop(); rmSync(logDir, { recursive: true, force: true }); }
+});
+
+test('plan limits: a background share below one call still holds the limit', async () => {
+  const { limitWait } = await import('../lib/plan.mjs');
+  const now = Date.now();
+  const w = limitWait({ upstream: 'u', limits: [{ name: 'pm', unit: 'calls', window: '60s', max: 1 }], records: [{ upstream: 'u', t: now - 1000, status: 200 }], models: {}, now, job: {}, active: [], share: 0.7 });
+  assert.ok(w.wait > 50_000, `must wait for the window, got ${w.wait}`);
+});
