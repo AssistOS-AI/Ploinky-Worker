@@ -13,11 +13,13 @@ test('different request budgets do not share a batch and request options reach c
   for(const maxTokens of [100,200]) w.enqueue({begin:{tier:'small',template:'Task $input',batch:true,request:{maxTokens,cache:'off',retryCut:false},code:'this.end(result)'}},'a');
   assert.ok((await w.flush()).every(r=>r.ok)); assert.deepEqual(calls.map(c=>c.maxTokens).sort(),[100,200]); assert.ok(calls.every(c=>c.cache==='off' && !c.retryCut));
 });
-test('extra batch IDs fail closed',async()=>{
-  const w=new Pworker({client:{json:async()=>({ok:true,json:{results:{a:'a',b:'b',extra:'bad'}}})},config:{batching:{small:{enabled:true}}}});
+test('extra batch IDs fail closed: nothing of that answer is delivered, the batch is split into single requests',async()=>{
+  const singles=[];
+  const w=new Pworker({client:{json:async()=>({ok:true,json:{results:{a:'a',b:'b',extra:'bad'}}}),chat:async o=>{singles.push(o.prompt);return {ok:true,text:o.prompt.toUpperCase()};}},config:{batching:{small:{enabled:true}}}});
   const t={begin:{tier:'small',template:'Task $input',batch:true}};
   w.enqueue(t,'a',{id:'a'});w.enqueue(t,'b',{id:'b'});
-  assert.ok((await w.flush()).every(r=>!r.ok && /Unexpected/.test(r.error)));
+  assert.deepEqual((await w.flush()).map(r=>r.value),['TASK A','TASK B']);
+  assert.deepEqual(singles.sort(),['Task a','Task b']);
 });
 test('a truncated but parseable response cannot become a successful task',async()=>{
   const w=new Pworker({client:{chat:async()=>({ok:true,text:'pos_likes(ada,tea).',cut:true})}});
