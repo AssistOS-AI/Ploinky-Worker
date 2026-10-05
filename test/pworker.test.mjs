@@ -1,0 +1,128 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { Pworker, batchTemplate, compileTask, loadTask, validateTask } from '../lib/pworker/task.mjs';
+import { jobStore } from '../lib/pworker/jobs.mjs';
+
+const exec = promisify(execFile);
+
+test('a task advances through model and processing phases', async () => {
+  const calls = [];
+  const client = { chat: async (o) => { calls.push(o); return { ok: true, text: 'HELLO' }; } };
+  const task = { begin: { tier: 'tiny', template: 'Uppercase $input', code: 'this.answer = result; this.next("finish")' }, finish: { tier: null, code: 'this.end(this.answer.toLowerCase())' } };
+  const worker = new Pworker({ client });
+  worker.enqueue(task, 'hello');
+  const [result] = await worker.flush();
+  assert.equal(result.value, 'hello');
+  assert.equal(result.steps, 2);
+  assert.equal(calls[0].prompt, 'Uppercase hello');
+  assert.equal(calls[0].tier, 'tiny');
+});
+
+test('explicit flush combines eligible tasks and dispatches results by id', async () => {
+  const calls = [];
+  const client = { json: async (o) => {
+    calls.push(o);
+    const requests = JSON.parse(o.prompt.split('Requests:\n')[1]);
+    return { ok: true, json: { results: Object.fromEntries(requests.map((r) => [r.id, String(r.input).toUpperCase()])) } };
+  } };
+  const task = { begin: { tier: 'small', template: 'Uppercase $input', batch: true, code: 'this.end(result)' } };
+  const worker = new Pworker({ client, config: { batching: { small: { enabled: true } } } });
+  worker.enqueue(task, 'a', { id: 'a' }); worker.enqueue(task, 'b', { id: 'b' });
+  const results = await worker.flush();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(results.map((r) => r.value), ['A', 'B']);
+  assert.equal(batchTemplate('prefix $input').variable, 'input');
+  assert.equal(batchTemplate('$a then $b'), null);
+  assert.throws(() => validateTask({ begin: { tier: 'tiny', batch: true, template: '$a and $b' } }), /batch/);
+});
+
+test('a text task is compiled to a reusable mjs file in the user home', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-task-'));
+  let calls = 0;
+  const client = { json: async () => { calls++; return { ok: true, json: { begin: { tier: null, code: 'this.end(this.input)' } } }; } };
+  try {
+    const first = await compileTask('echo input', { client, home });
+    const second = await compileTask('echo input', { client, home });
+    assert.equal(first.file, second.file);
+    assert.equal(second.cached, true);
+    assert.equal(calls, 1);
+    assert.deepEqual(await loadTask(first.file), first.task);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('phase code has no process or filesystem access', async () => {
+  const worker = new Pworker({ client: {} });
+  worker.enqueue({ begin: { tier: null, code: 'this.end(process.env.HOME)' } }, {});
+  const [result] = await worker.flush();
+  assert.equal(result.ok, false);
+  assert.match(result.error, /process is not defined/);
+});
+
+test('each task receives its supplied working directory and confined file operations', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-work-'));
+  const a = path.join(root, 'a'), b = path.join(root, 'b');
+  fs.mkdirSync(a); fs.mkdirSync(b);
+  const task = { begin: { tier: null, code: 'await this.writeFile("result.txt", this.input); this.end(await this.readFile("result.txt"))' } };
+  try {
+    const worker = new Pworker({ client: {} });
+    worker.enqueue(task, 'first', { currentWorkingDirectory: a });
+    worker.enqueue(task, 'second', { currentWorkingDirectory: b });
+    const results = await worker.flush();
+    assert.deepEqual(results.map((r) => r.value), ['first', 'second']);
+    assert.deepEqual(results.map((r) => r.state.currentWorkingDirectory), [a, b]);
+    assert.equal(fs.readFileSync(path.join(a, 'result.txt'), 'utf8'), 'first');
+    assert.equal(fs.readFileSync(path.join(b, 'result.txt'), 'utf8'), 'second');
+    const blocked = new Pworker({ client: {} });
+    blocked.enqueue({ begin: { tier: null, code: 'await this.writeFile("../escape.txt", "bad")' } }, {}, { currentWorkingDirectory: a });
+    assert.match((await blocked.flush())[0].error, /outside the work folder/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('detached task records persist their phase and result', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-jobs-'));
+  try {
+    const store = jobStore(home);
+    const job = store.create({ request: 'test', input: { input: 'hello' }, currentWorkingDirectory: '/tmp' });
+    store.update(job.id, { status: 'running', phase: 'analyze', steps: 2 });
+    assert.equal(jobStore(home).view(job.id).phase, 'analyze');
+    store.update(job.id, { status: 'completed', phase: null, result: { value: 'done' } });
+    assert.equal(jobStore(home).list()[0].result.value, 'done');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('CLI --async returns an ID and --status retrieves the finished result', { timeout: 15_000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-async-'));
+  const home = path.join(root, 'home'), work = path.join(root, 'work'), file = path.join(root, 'task.mjs');
+  fs.mkdirSync(work);
+  fs.writeFileSync(file, 'export default { begin: { tier: null, code: \'await this.writeFile("answer.txt", this.input); this.end(await this.readFile("answer.txt"))\' } };\n');
+  const socket = net.createServer();
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
+  const port = socket.address().port;
+  await new Promise((resolve) => socket.close(resolve));
+  const env = { ...process.env, PWORKER_HOME: home, PWORKER_PORT: String(port) };
+  const bin = path.resolve('bin/pworker.mjs');
+  const cli = async (...args) => JSON.parse((await exec(process.execPath, [bin, ...args], { env })).stdout);
+  try {
+    const submitted = await cli('run', file, '--input', 'hello', '--cwd', work, '--async');
+    assert.match(submitted.id, /^[a-f0-9-]{36}$/);
+    let status;
+    for (let i = 0; i < 100; i++) {
+      status = await cli('--status', submitted.id);
+      if (['completed', 'failed'].includes(status.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(status.status, 'completed', status.error);
+    assert.equal(status.result.value, 'hello');
+    assert.equal(fs.readFileSync(path.join(work, 'answer.txt'), 'utf8'), 'hello');
+    assert.equal((await cli('--status'))[0].id, submitted.id);
+  } finally {
+    await exec(process.execPath, [bin, 'stop'], { env }).catch(() => {});
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

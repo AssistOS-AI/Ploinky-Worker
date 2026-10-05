@@ -1,0 +1,540 @@
+{
+  "_note": "Ploinky Workers defaults. User configuration and API keys live in ~/.pworker. Tiers select providers and models; local servers can start on demand.",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 18080
+  },
+  "dataDir": "~/.pworker/data",
+  "cacheDir": "~/.pworker/cache",
+  "auditDir": "~/.pworker/audit",
+  "logDir": "~/.pworker/logs",
+  "promptsDir": "prompts",
+  "defaultUpstream": "openference",
+  "injectStreamUsage": true,
+  "modelsCacheSeconds": 600,
+  "providers": {
+    "openference": {
+      "baseUrl": "https://api.openference.com",
+      "envFile": "openference.env",
+      "keyVar": "OPENFERENCE_API_KEY",
+      "baseUrlVar": "OPENFERENCE_BASE_URL",
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions",
+        "anthropic": "/v1/messages"
+      },
+      "limits": {
+        "maxConcurrent": 4,
+        "maxPerSecond": 5,
+        "maxPerMinute": 15,
+        "maxPerHour": 800
+      },
+      "retry": {
+        "max": 4,
+        "baseMs": 1000,
+        "maxWaitMs": 60000,
+        "max5xx": 2
+      },
+      "plan": {
+        "priceUsdPerMonth": 15,
+        "_note": "15 requests per minute; about 400 plan credits per 5 hours and 7,500 per week; a call costs its model's quota_multiplier (x-quota-cost).",
+        "limits": [
+          {
+            "name": "per_minute",
+            "unit": "calls",
+            "window": "60s",
+            "max": 15,
+            "provider": {
+              "remainingHeader": "x-ratelimit-remaining",
+              "resetHeader": "x-ratelimit-reset"
+            }
+          },
+          {
+            "name": "per_5h",
+            "unit": "credits",
+            "window": "5h",
+            "max": 400,
+            "provider": {
+              "remainingHeader": "x-quota-remaining",
+              "costHeader": "x-quota-cost"
+            }
+          },
+          {
+            "name": "per_week",
+            "unit": "credits",
+            "window": "7d",
+            "max": 7500
+          }
+        ]
+      }
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api",
+      "envFile": "openrouter.env",
+      "keyVar": "OPENROUTER_API_KEY",
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxConcurrent": 8,
+        "maxPerSecond": 5,
+        "maxPerMinute": 120,
+        "maxPerHour": 3000
+      },
+      "retry": {
+        "max": 4,
+        "baseMs": 1000,
+        "maxWaitMs": 60000
+      }
+    },
+    "deepseek": {
+      "baseUrl": "https://api.deepseek.com",
+      "envFile": "deepseek.env",
+      "keyVar": "DEEPSEEK_API_KEY",
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxConcurrent": 8,
+        "maxPerSecond": 5,
+        "maxPerMinute": 120,
+        "maxPerHour": 3000
+      },
+      "retry": {
+        "max": 4,
+        "baseMs": 1000,
+        "maxWaitMs": 60000
+      }
+    },
+    "local": {
+      "_note": "Local tiny model: Qwen3.6-35B-A3B, eight slots of 16k tokens, started on demand.",
+      "baseUrl": "http://127.0.0.1:19611",
+      "noKey": true,
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxPerSecond": 50,
+        "maxPerMinute": 3000,
+        "maxPerHour": 100000
+      },
+      "retry": {
+        "max": 0,
+        "max5xx": 0,
+        "baseMs": 500,
+        "maxWaitMs": 5000
+      },
+      "start": {
+        "bin": "llama-server",
+        "gguf": "~/.pworker/models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+        "alias": "Qwen3.6-35B-A3B",
+        "slots": 8,
+        "ctxPerSlot": 16384,
+        "args": [
+          "-ngl",
+          "99",
+          "-fa",
+          "on",
+          "--jinja",
+          "--no-webui"
+        ],
+        "requireFreeGpu": false,
+        "startTimeoutMs": 300000,
+        "idleStopMs": 0,
+        "startAtBoot": false
+      }
+    },
+    "localsuper": {
+      "_note": "Local micro model: Qwen3-4B-Instruct-2507, started on demand and stopped after 15 idle minutes.",
+      "baseUrl": "http://127.0.0.1:19613",
+      "noKey": true,
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxPerSecond": 200,
+        "maxPerMinute": 6000,
+        "maxPerHour": 200000
+      },
+      "retry": {
+        "max": 0,
+        "max5xx": 0,
+        "baseMs": 500,
+        "maxWaitMs": 5000
+      },
+      "start": {
+        "bin": "llama-server",
+        "gguf": "~/.pworker/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        "alias": "Qwen3-4B",
+        "slots": 32,
+        "ctxPerSlot": 4096,
+        "args": [
+          "-ngl",
+          "99",
+          "-fa",
+          "on",
+          "--jinja",
+          "--no-webui",
+          "--cache-reuse",
+          "256"
+        ],
+        "requireFreeGpu": false,
+        "startTimeoutMs": 120000,
+        "idleStopMs": 900000,
+        "startAtBoot": false
+      }
+    },
+    "localnano": {
+      "_note": "nano: Qwen3-0.6B (Q8_0), on demand, stopped after 15 idle minutes, 32 slots; the smallest and fastest local model.",
+      "baseUrl": "http://127.0.0.1:19614",
+      "noKey": true,
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxPerSecond": 200,
+        "maxPerMinute": 6000,
+        "maxPerHour": 200000
+      },
+      "retry": {
+        "max": 0,
+        "max5xx": 0,
+        "baseMs": 500,
+        "maxWaitMs": 5000
+      },
+      "start": {
+        "bin": "llama-server",
+        "gguf": "~/.pworker/models/Qwen3-0.6B-Q8_0.gguf",
+        "alias": "Qwen3-0.6B",
+        "slots": 32,
+        "ctxPerSlot": 4096,
+        "args": [
+          "-ngl",
+          "99",
+          "-fa",
+          "on",
+          "--jinja",
+          "--no-webui",
+          "--cache-reuse",
+          "256"
+        ],
+        "requireFreeGpu": false,
+        "startTimeoutMs": 120000,
+        "idleStopMs": 900000,
+        "startAtBoot": false
+      }
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com",
+      "envFile": "openai.env",
+      "keyVar": "OPENAI_API_KEY",
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxConcurrent": 4,
+        "maxPerMinute": 60
+      }
+    },
+    "zai": {
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "envFile": "zai.env",
+      "keyVar": "PWORKER_ZAI_API_KEY",
+      "modelsPath": "/models",
+      "formats": {
+        "openai": "/chat/completions"
+      },
+      "limits": {
+        "maxConcurrent": 4,
+        "maxPerMinute": 60
+      }
+    },
+    "grok": {
+      "baseUrl": "https://api.x.ai",
+      "envFile": "grok.env",
+      "keyVar": "PWORKER_GROK_API_KEY",
+      "modelsPath": "/v1/models",
+      "formats": {
+        "openai": "/v1/chat/completions"
+      },
+      "limits": {
+        "maxConcurrent": 4,
+        "maxPerMinute": 60
+      }
+    }
+  },
+  "tiers": {
+    "_note": "Clients request a tier rather than a concrete model. Each tier is an ordered provider/model chain. Providers without keys are skipped; local models can serve when configured.",
+    "maxWaitMs": 120000,
+    "nano": [
+      {
+        "upstream": "localnano",
+        "model": "Qwen3-0.6B"
+      }
+    ],
+    "micro": [
+      {
+        "upstream": "localsuper",
+        "model": "Qwen3-4B"
+      },
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "supertiny": "micro",
+    "tiny": [
+      {
+        "upstream": "openference",
+        "model": "DeepSeek-V4-Flash-0731"
+      },
+      {
+        "upstream": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "extraBody": {
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "small": [
+      {
+        "upstream": "openference",
+        "model": "Qwen3.8 27b"
+      },
+      {
+        "upstream": "openference",
+        "model": "DeepSeek-V4-Flash-0731"
+      },
+      {
+        "upstream": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "extraBody": {
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "medium": [
+      {
+        "upstream": "openference",
+        "model": "DeepSeek-V4-Flash-0731"
+      },
+      {
+        "upstream": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "extraBody": {
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "good": [
+      {
+        "upstream": "openference",
+        "model": "DeepSeek-V4-Flash-0731",
+        "timeoutMs": 290000
+      },
+      {
+        "upstream": "openrouter",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "extraBody": {
+          "reasoning": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ],
+    "best": [
+      {
+        "upstream": "local",
+        "model": "Qwen3.6-35B-A3B"
+      }
+    ]
+  },
+  "fallback": {
+    "from": "openference",
+    "upstream": "openrouter",
+    "models": {
+      "Qwen3.8 27b": "deepseek/deepseek-v4-flash"
+    },
+    "maxWaitMs": 120000
+  },
+  "audit": {
+    "enabled": true,
+    "tiers": [
+      "tiny",
+      "small",
+      "medium"
+    ],
+    "upstreams": [
+      "local"
+    ],
+    "maxBytesPerDay": 209715200,
+    "maxDays": 14,
+    "maxCharsPerField": 200000
+  },
+  "policy": {
+    "allowedPurposes": [
+      "chat",
+      "formalize",
+      "answer-*",
+      "ingest",
+      "job:*",
+      "review:*",
+      "lambda:*",
+      "run:*",
+      "test:*"
+    ],
+    "untaggedDailyMax": 100,
+    "keepDays": 7
+  },
+  "interactive": {
+    "purposes": [
+      "chat",
+      "formalize",
+      "answer-*"
+    ],
+    "maxWaitMs": 15000
+  },
+  "cache": {
+    "defaultMode": "use"
+  },
+  "runner": {
+    "_note": "The job runner (jobs, tasks, run-lambdas): run folders, the template library a task planner chooses from, roles (role -> tier), limits of planned tasks.",
+    "dataDir": "~/.pworker/runs",
+    "templatesDir": null,
+    "roles": {
+      "planner": "good",
+      "decider": "good",
+      "auditor": "medium",
+      "worker": "small",
+      "worker-short": "tiny"
+    },
+    "limits": {
+      "maxTaskUsd": 2,
+      "maxTaskCredits": 100,
+      "maxTaskCalls": 2000
+    },
+    "tasks": {
+      "keepDays": 7
+    }
+  },
+  "lambdas": {
+    "_note": "Internal task modules, project modules, and job folders.",
+    "project": [],
+    "jobs": {}
+  },
+  "calls": {
+    "_note": "Call records are stored under the Pworker home unless calls.dir is set.",
+    "dir": null,
+    "keepArtifactsDays": 30,
+    "jobItems": true,
+    "maxResultBytes": 1000000,
+    "maxInputs": 2000
+  },
+  "run": {
+    "budget": {
+      "usd": 0.5,
+      "credits": 60,
+      "calls": 300
+    },
+    "maxSteps": 5
+  },
+  "agent": {
+    "_note": "Internal planner settings.",
+    "lambdasDir": null,
+    "skillDirs": [],
+    "plannerTier": null,
+    "matchTier": "tiny",
+    "askTiers": null,
+    "maxRounds": 3,
+    "maxAsks": 30,
+    "maxToolCalls": 2000,
+    "timeMs": 120000,
+    "checkOnReuse": true,
+    "reusePure": true,
+    "budget": null,
+    "match": {
+      "k": 3,
+      "minScore": 0,
+      "grounded": true,
+      "maxTokens": 400,
+      "extraBody": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    },
+    "planner": {
+      "maxTokens": 8000
+    }
+  },
+  "sandbox": {
+    "timeMs": 120000,
+    "heapMb": 128,
+    "maxCalls": 50,
+    "maxCodeBytes": 20000,
+    "maxOutputBytes": 1000000,
+    "tiers": [
+      "nano",
+      "micro",
+      "tiny",
+      "small",
+      "medium"
+    ]
+  },
+  "background": {
+    "share": 0.7,
+    "purposes": [],
+    "_note": "Background work is queued behind interactive requests and stays within its configured share of rate limits."
+  },
+  "batching": {
+    "nano": {
+      "enabled": false
+    },
+    "micro": {
+      "enabled": false
+    },
+    "tiny": {
+      "enabled": false
+    },
+    "small": {
+      "enabled": false
+    },
+    "medium": {
+      "enabled": false
+    },
+    "good": {
+      "enabled": false
+    },
+    "best": {
+      "enabled": false
+    }
+  }
+}
