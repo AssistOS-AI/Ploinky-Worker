@@ -64,3 +64,18 @@ test('server can retrieve task results after restart',async()=>{
     assert.equal((await client.op(done.id)).result.value,42);
   }finally{if(restarted)await restarted.close();await t.close();}
 });
+
+test('one proxy per home: a second serve for the same home refuses and clients find the recorded port',async()=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'pworker-one-proxy-')),env={PWORKER_HOME:home};
+  const {serve,readServerRecord}=await import('../lib/server.mjs');
+  const {createPworkerClient}=await import('../lib/client.mjs');
+  const first=await serve({port:0,env,project:false,log:()=>{}});
+  try{
+    const record=readServerRecord(home);
+    assert.equal(record.pid,process.pid);assert.ok(record.port>0);
+    const second=await serve({port:0,env,project:false,log:()=>{}});
+    assert.equal(second.already,true);assert.equal(second.port,record.port);
+    const client=createPworkerClient({purpose:'test:one-proxy',autostart:false,env:{PWORKER_HOME:home}});
+    assert.equal(client.url,`http://127.0.0.1:${record.port}`);
+  }finally{await first.close();fs.rmSync(home,{recursive:true,force:true});}
+});

@@ -14,11 +14,12 @@ import { selectMenu, promptChat, promptField } from '../lib/pworker/menu.mjs';
 import { connectedProviders, fetchModelCatalog, formatModelLabel, isModelEligibleForTier, modelExclusionReason, normalizeModelCatalog, providerSpec, sortModelCatalog } from '../lib/pworker/providers.mjs';
 import { resolveUpstream } from '../lib/settings.mjs';
 import { HELP } from '../lib/pworker/help.mjs';
+import { liveServer, readServerRecord } from '../lib/server.mjs';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const command = args[0];
 const home = pworkerHome();
-const pidFile = path.join(home, 'pworker.pid');
 const configFile = path.join(home, 'config.json');
 const queueFile = path.join(home, 'queue.json');
 const option = (name, fallback = null) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; };
@@ -28,29 +29,25 @@ const sleep = (n) => new Promise((resolve) => setTimeout(resolve, n));
 
 function readUserConfig() { return JSON.parse(fs.readFileSync(configFile, 'utf8')); }
 function saveUserConfig(c) { fs.writeFileSync(configFile, JSON.stringify(c, null, 2) + '\n', { mode: 0o600 }); }
-function runningPid() {
-  try {
-    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-    const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-    return cmdline.includes('/pworker.mjs') && cmdline.includes('serve') ? pid : null;
-  } catch { return null; }
-}
+// The proxy of this home: its recorded process exists and answers /health on the recorded port (lib/server.mjs). No process-name
+// matching, so it works with npm link, other launchers and on every platform.
+async function runningPid() { return (await liveServer(home))?.pid ?? null; }
 async function startProxy() {
-  if (runningPid()) return;
+  if (await runningPid()) return;
   const log = fs.openSync(path.join(home, 'logs', 'pworker.log'), 'a');
-  const child = spawn(process.execPath, [path.resolve(process.argv[1]), 'serve'], { detached: true, stdio: ['ignore', log, log] });
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'serve'], { detached: true, stdio: ['ignore', log, log] });
   child.unref(); fs.closeSync(log);
-  for (let i = 0; i < 40; i++) { await sleep(250); if (runningPid()) return; }
+  for (let i = 0; i < 40; i++) { await sleep(250); if (await runningPid()) return; }
   throw new Error(`The proxy did not start. See ${path.join(home, 'logs', 'pworker.log')}`);
 }
 async function stopProxy() {
-  const pid = runningPid();
+  const pid = await runningPid();
   if (!pid) return false;
   process.kill(pid, 'SIGTERM');
-  for (let i = 0; i < 40; i++) { await sleep(100); if (!runningPid()) return true; }
+  for (let i = 0; i < 40; i++) { await sleep(100); if (!readServerRecord(home) || !(await runningPid())) return true; }
   return false;
 }
-async function restartProxy() { if (runningPid()) { await stopProxy(); await startProxy(); } }
+async function restartProxy() { if (await runningPid()) { await stopProxy(); await startProxy(); } }
 
 function publicJob(job) {
   if (!job) return null;
@@ -72,7 +69,7 @@ function startDetachedTasks(items) {
   fs.writeFileSync(manifest, JSON.stringify(jobs.map((job) => job.id)), { mode: 0o600 });
   const log = fs.openSync(path.join(home, 'logs', `batch-${batchId}.log`), 'a', 0o600);
   try {
-    const child = spawn(process.execPath, [path.resolve(process.argv[1]), '_execute-batch', batchId], { cwd: process.cwd(), detached: true, stdio: ['ignore', log, log] });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_execute-batch', batchId], { cwd: process.cwd(), detached: true, stdio: ['ignore', log, log] });
     if (!child.pid) throw new Error('Could not start the task process');
     for (const job of jobs) store.update(job.id, { pid: child.pid });
     child.unref();
@@ -429,10 +426,7 @@ async function main() {
   if (command === 'serve') {
     const { serve } = await import('../lib/server.mjs');
     const proxy = await serve({ port: option('port'), host: option('host') });
-    if (proxy?.already) return;
-    fs.writeFileSync(pidFile, `${process.pid}\n`, { mode: 0o600 });
-    const clear = () => { try { if (Number(fs.readFileSync(pidFile, 'utf8')) === process.pid) fs.unlinkSync(pidFile); } catch {} };
-    process.on('exit', clear);
+    if (proxy?.already) process.exitCode = 3;
     return;
   }
   if (command === 'start') { await startProxy(); console.log('Proxy started.'); return; }
