@@ -16,6 +16,7 @@ import { resolveUpstream } from '../lib/settings.mjs';
 import { HELP } from '../lib/pworker/help.mjs';
 import { liveServer, readServerRecord } from '../lib/server.mjs';
 import { fileURLToPath } from 'node:url';
+import { readRecords, summarize, formatSummary, parseSince } from '../lib/metrics.mjs';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -55,6 +56,17 @@ const takeQueue = () => withQueueLock(() => {
 // Text that names a task file (an existing path, or a single word ending in .json/.mjs) is stored as an absolute path at queue time.
 const isTaskFile = (request) => /\.(mjs|json)$/.test(request) && (fs.existsSync(request) || !/\s/.test(request.trim()));
 const KNOWN_COMMANDS = new Set(['help', 'status', 'serve', 'start', 'stop', 'stats', 'models', 'provider', 'tier', 'queue', 'run', 'flush', '_execute-batch']);
+
+// `pworker stats`: request metrics read from the request log of this home (no running proxy needed).
+function printStats({ since = option('since', '24h'), provider = option('provider'), asJson = args.includes('--json'), by = option('by') } = {}) {
+  const config = loadLayers().config;
+  const span = parseSince(since), now = Date.now();
+  const limits = Object.fromEntries(Object.entries(config.providers ?? config.upstreams ?? {}).filter(([n]) => !n.startsWith('_')).map(([n, p]) => [n, p?.limits ?? {}]));
+  const dataDir = config.dataDir ?? path.join(home, 'data');
+  const bucket = by === 'day' || by === 'hour' ? by : span > 2 * 86400_000 ? 'day' : 'hour';
+  const summary = summarize(readRecords(dataDir, now - span), { since: now - span, now, provider, limits, bucket });
+  if (asJson) json(summary); else process.stdout.write(formatSummary(summary, { limits }));
+}
 
 function readUserConfig() { return JSON.parse(fs.readFileSync(configFile, 'utf8')); }
 function saveUserConfig(c) { fs.writeFileSync(configFile, JSON.stringify(c, null, 2) + '\n', { mode: 0o600 }); }
@@ -419,7 +431,7 @@ async function interactive(currentWorkingDirectory) {
       if (!choice || choice === 'exit') return;
       try {
         if (choice === 'stop') { note((await stopProxy()) ? 'Proxy stopped.' : 'The proxy is not running.'); return; }
-        if (choice === 'stats') { json(await client().stats()); continue; }
+        if (choice === 'stats') { printStats({ since: '24h' }); continue; }
         if (choice === 'connect') {
           const connected = await connectProvider(screen);
           if (connected && await selectMenu(screen, `${connected.name} is ready`, [{ label: 'Configure a tier now', value: 'tier' }]) === 'tier') await configureTier(screen, connected.name);
@@ -461,6 +473,7 @@ async function main() {
   }
   if (command === 'start') { await startProxy(); console.log('Proxy started.'); return; }
   if (command === 'stop') { console.log((await stopProxy()) ? 'Proxy stopped.' : 'The proxy is not running.'); return; }
+  if (command === 'stats' && !args.includes('--proxy')) { printStats(); return; }
   if (['run', '--async', 'queue', 'flush', 'stats', 'models', 'tier'].includes(command)) await startProxy();
   if (command === 'stats') { json(await client().stats()); return; }
   if (command === 'models') { const action = args[1]; json(action === 'start' || action === 'stop' ? await client().model(args[2], action) : await client().models()); return; }
@@ -539,6 +552,6 @@ async function main() {
     if (failed.length || results.some((r) => !r.ok)) process.exitCode = 1;
     return;
   }
-  console.log('pworker [run <task.json|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
+  console.log('pworker [run <task.json|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats [--since 1h|24h|7d] [--provider P] [--by hour|day] [--json] [--proxy] | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
 }
 main().catch((e) => { console.error(e.message); process.exitCode = 1; });

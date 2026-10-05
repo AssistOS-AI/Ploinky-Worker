@@ -106,3 +106,40 @@ test('invariant: only the proxy core sends model requests to providers', () => {
   // Clients (CLI, detached workers, the library) reach models only through the proxy's HTTP API.
   for (const file of ['lib/client.mjs', 'bin/pworker.mjs', 'lib/pworker/task.mjs']) assert.doesNotMatch(fs.readFileSync(path.join(root, file), 'utf8'), /createCore|createProxy/, file);
 });
+
+test('metrics: per provider/model and hour, 429s under the configured limit, retries, cache hits, batching savings; the CLI reads the log', async () => {
+  const { summarize, formatSummary, readRecords } = await import('../lib/metrics.mjs');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const now = Date.now(), t = (s) => now - 600_000 + s * 1000;
+  const recs = [
+    { upstream: 'openference', model: 'M', tier: 'small', t: t(0), t_sent: t(0), status: 200, attempt: 1, in_tokens: 10, out_tokens: 5, queue_wait_ms: 0 },
+    { upstream: 'openference', model: 'M', tier: 'small', t: t(1), t_sent: t(1), status: 429, attempt: 1, queue_wait_ms: 100 },
+    { upstream: 'openference', model: 'M', tier: 'small', t: t(3), t_sent: t(3), status: 429, attempt: 2, under_limit: false },
+    { upstream: 'openference', model: 'M', tier: 'small', t: t(6), t_sent: t(5), status: 200, attempt: 3, batch_size: 4, in_tokens: 40, out_tokens: 20 },
+    { upstream: 'openference', model: 'M', t: t(7), t_sent: t(7), status: 504, timeout: true, attempt: 1 },
+    { upstream: 'cache', model: 'small', served: 'openference/M', tier: 'small', t: t(8), status: 200 },
+    { upstream: 'openference', model: 'M', t: t(9), status: 402, not_sent: true },
+    { upstream: 'other', model: 'X', t: t(10), t_sent: t(10), status: 200, attempt: 1 },
+  ];
+  const s = summarize(recs, { since: now - 3600_000, now, provider: 'openference', limits: { openference: { maxPerMinute: 15 } }, bucket: 'hour' });
+  assert.equal(s.groups.length, 1);
+  const g = s.groups[0];
+  assert.deepEqual([g.sent, g.ok, g.r429, g.r429_under_limit, g.errors, g.retries, g.timeouts, g.cache_hits, g.batch_saved, g.in_tokens, g.peak_per_minute], [5, 2, 2, 1, 2, 2, 1, 1, 3, 50, 5]);
+  assert.deepEqual(g.tiers, ['small']);
+  assert.ok(s.buckets.length >= 1);
+  const text = formatSummary(s, { limits: { openference: { maxPerMinute: 15 } } });
+  assert.match(text, /openference\/M/); assert.match(text, /429<lim/); assert.match(text, /1 of 2 429 responses/);
+  // The CLI prints the same from the request log of the home, without a proxy.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pworker-stats-'));
+  try {
+    fs.mkdirSync(path.join(home, 'data'), { recursive: true });
+    for (const r of recs) fs.appendFileSync(path.join(home, 'data', `requests-${new Date(r.t).toISOString().slice(0, 10)}.jsonl`), JSON.stringify(r) + '\n');
+    assert.equal(readRecords(path.join(home, 'data'), now - 3600_000).length, recs.length);
+    const out = await promisify(execFile)(process.execPath, [path.resolve('bin/pworker.mjs'), 'stats', '--since', '1h', '--provider', 'openference', '--json'], { env: { ...process.env, PWORKER_HOME: home } });
+    const j = JSON.parse(out.stdout);
+    assert.equal(j.groups[0].sent, 5); assert.equal(j.total.r429_under_limit, 1);
+    const table = await promisify(execFile)(process.execPath, [path.resolve('bin/pworker.mjs'), 'stats', '--since', '1h'], { env: { ...process.env, PWORKER_HOME: home } });
+    assert.match(table.stdout, /other\/X/);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});

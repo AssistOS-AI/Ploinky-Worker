@@ -72,10 +72,14 @@ pworker flush --async</code></pre></div>
     <section id="proxy">
       <h2>Proxy, storage, and monitoring</h2>
       <div class="codebox"><div class="terminalhead">proxy commands</div><pre><code>pworker start
-pworker stats
+pworker stats --since 24h
+pworker stats --provider openference --since 7d --by day
+pworker stats --json
 pworker stop
 pworker serve --host 127.0.0.1 --port 18080</code></pre></div>
       <p>The proxy is independent of the interactive CLI. It listens on <code>http://127.0.0.1:18080</code> by default. The proxy exposes chat completions, model lists, health, and statistics. It records request counts, byte totals, cache hits, and provider limits. Identical complete requests to the same effective model can be served from cache.</p>
+      <p>All model requests of a Pworker home go through its one proxy, so provider limits are applied in one place; a second proxy for the same home refuses to start. Every attempt, retries included, is counted when it is sent. A 429 pauses the provider for its full <code>Retry-After</code> and lowers an adaptive rate that recovers slowly; <code>"pacing": "even"</code> spreads requests evenly over the minute. See <a href="rate-limits.md">rate limits</a>.</p>
+      <p><code>pworker stats</code> reads the request log of the home, so it works without a running proxy. It prints one row per provider and model (with the tiers it served) and one per hour, or per day with <code>--by day</code> or a <code>--since</code> beyond two days: attempts sent upstream, successes, 429 responses, 429 responses that came while every configured rate was respected (<code>429&lt;lim</code>, evidence that a provider throttles below its configured limit), other errors, retries, timeouts, cache hits, requests saved by batching, tokens, average queue wait, and the peak and average number of attempts per minute. <code>--provider NAME</code> filters, <code>--json</code> prints the same data as JSON, and <code>--proxy</code> prints the running proxy's raw <code>/stats</code>.</p>
       <p>User settings and runtime data live in <code>~/.pworker/</code> or <code>PWORKER_HOME</code>. API keys are stored in private files under <code>keys/</code>; task files, jobs, request logs, and response cache have separate directories. <code>PWORKER_PORT</code>, <code>PWORKER_URL</code>, <code>PWORKER_CONFIG</code>, and <code>PWORKER_TOKEN</code> adjust the proxy and client environment.</p>
     </section>
     <section id="library">

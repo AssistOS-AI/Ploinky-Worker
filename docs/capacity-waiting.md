@@ -1,12 +1,14 @@
 # Capacity-aware tasks and recovery
 
+How the proxy counts, paces and adapts provider requests, and why a provider can answer 429 below its configured limit, is described in [rate-limits.md](rate-limits.md).
+
 Declared task model phases wait for capacity by default. HTTP 429 does not exhaust a retry counter and fail the task: the proxy holds the request, honors the full `Retry-After` delay (seconds or HTTP date), and retries when the queue permits. Provider limits and plan budgets still apply. No fallback is selected merely to bypass a capacity wait. Normal non-task proxy callers retain their configured finite retry policy unless they opt into capacity waiting.
 
 ## Separate queue time from model time
 
 For task phases, `request.timeoutMs` limits an actual upstream generation attempt, not time in the local queue or provider cooldown. The client sends a capacity-wait flag and an upstream-attempt timeout, without a wall-clock deadline over the entire queued HTTP request. An explicit AbortSignal still cancels it. A real upstream generation timeout returns `upstream_timeout`; invalid credentials, invalid task data, malformed output and truncated output remain genuine failures. Waiting must not hide those errors.
 
-Transient transport failures and 5xx responses are deferred with bounded backoff by capacity-aware clients. A proxy restart can interrupt the connection; the waiting phase can reconnect without replaying already completed phase code. Provider cooldown timestamps are logged as `deferred_until` and restored on restart, so restarting cannot erase a cooldown.
+Transient transport failures and 5xx responses are deferred with bounded backoff by capacity-aware clients: after a bounded number of retries (`retries`, default 8) a permanent failure such as `tier_unavailable`, `proxy_error` or `local_unavailable` is reported instead of being retried forever. Only capacity signals (429, 529, 503 with `Retry-After`) are waited for without limit. A proxy restart can interrupt the connection; the waiting phase can reconnect without replaying already completed phase code. Provider cooldown timestamps are logged as `deferred_until` and restored on restart, so restarting cannot erase a cooldown.
 
 ## State and persistence
 
