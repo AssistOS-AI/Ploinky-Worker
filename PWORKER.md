@@ -73,9 +73,11 @@ pworker --status
 pworker --status TASK_ID
 ```
 
-The first command returns JSON with `id` and `status`. `--status` lists all detached tasks; `--status TASK_ID` reports one task. A record has `queued`, `compiling`, `running`, `completed`, or `failed` status. While running, `phase` names the current task phase and `steps` counts phase executions. When complete, `result` contains the value and final task state; on failure, `error` explains the problem. Status and results are stored under `~/.pworker/jobs/`, so they remain available after the calling process exits. A stopped worker process is marked failed when status is next read. `pworker flush --async` sends the whole queued group to one detached worker, preserving prompt batching, and returns one ID per task.
+The first command returns JSON with `id` and `status`. `--status` lists all detached tasks; `--status TASK_ID` reports one task. A record has `queued`, `compiling`, `running`, `waiting`, `completed`, `cancelled`, or `failed` status. While running, `phase` names the current task phase and `steps` counts phase executions. When complete, `result` contains the value and final task state; on failure, `error` explains the problem. Status and results are stored under `~/.pworker/jobs/`, so they remain available after the calling process exits. A stopped worker with a waiting-phase checkpoint is recoverable; a stopped worker without a safe checkpoint is marked failed. `pworker flush --async` sends the whole queued group to one detached worker, preserving prompt batching, and returns one ID per task.
 
 ## Task working directory and file operations
+
+Model phases can remain in `waiting` while provider capacity is unavailable. A 429 is deferred rather than converted into a task failure; `request.timeoutMs` bounds an upstream attempt, not queue time. Waiting checkpoints and cooldowns survive a server restart. See [capacity waiting and recovery](docs/capacity-waiting.md) for cancellation, limitations and tests.
 
 The caller chooses the exact directory with `--cwd DIR`, `--current-working-directory DIR`, or the `currentWorkingDirectory` field in the input object. The library also accepts `worker.enqueue(task, input, { currentWorkingDirectory: DIR })`. Pworker resolves the directory when the task starts, adds it to that task's state as `this.currentWorkingDirectory`, and does **not** create a subdirectory. Two tasks given the same directory can access the same files; their state variables remain separate.
 

@@ -62,7 +62,7 @@ pworker queue clear</code></pre></div>
 pworker --status
 pworker --status TASK_ID
 pworker flush --async</code></pre></div>
-      <p><code>--async</code> returns immediately with a task ID. <code>--status</code> lists detached tasks; <code>--status TASK_ID</code> shows one task's state, current phase, result, or error. States include queued, compiling, running, completed, and failed. Status remains available after the caller exits. <code>flush --async</code> gives each queued task an ID and runs the group in one detached worker.</p>
+      <p><code>--async</code> returns immediately with a task ID. <code>--status</code> lists detached tasks; <code>--status TASK_ID</code> shows one task's state, current phase, result, or error. States include queued, compiling, running, waiting, completed, cancelled, and failed. Waiting model phases retain checkpoints; provider cooldowns and pending phases can be recovered after restart. Status remains available after the caller exits. <code>flush --async</code> gives each queued task an ID and runs the group in one detached worker.</p>
     </section>
     <section id="workspace">
       <h2>Working directory and file methods</h2>
