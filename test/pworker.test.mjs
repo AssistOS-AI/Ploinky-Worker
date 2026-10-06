@@ -17,7 +17,7 @@ const exec = promisify(execFile);
 test('a task advances through model and processing phases', async () => {
   const calls = [];
   const client = { chat: async (o) => { calls.push(o); return { ok: true, text: 'HELLO' }; } };
-  const task = { begin: { tier: 'tiny', template: 'Uppercase $input', code: 'this.answer = result; this.next("finish")' }, finish: { tier: null, code: 'this.end(this.answer.toLowerCase())' } };
+  const task = { begin: { tier: 'tiny', template: 'Uppercase ${input}', code: 'this.answer = result; this.next("finish")' }, finish: { tier: null, code: 'this.end(this.answer.toLowerCase())' } };
   const worker = new Pworker({ client });
   worker.enqueue(task, 'hello');
   const [result] = await worker.flush();
@@ -34,15 +34,15 @@ test('explicit flush combines eligible tasks and dispatches results by id', asyn
     const requests = JSON.parse(o.prompt.split('Requests:\n')[1]);
     return { ok: true, json: { results: Object.fromEntries(requests.map((r) => [r.id, String(r.input).toUpperCase()])) } };
   } };
-  const task = { begin: { tier: 'small', template: 'Uppercase $input', batch: true, code: 'this.end(result)' } };
+  const task = { begin: { tier: 'small', template: 'Uppercase ${input}', batch: true, code: 'this.end(result)' } };
   const worker = new Pworker({ client, config: { batching: { small: { enabled: true } } } });
   worker.enqueue(task, 'a', { id: 'a' }); worker.enqueue(task, 'b', { id: 'b' });
   const results = await worker.flush();
   assert.equal(calls.length, 1);
   assert.deepEqual(results.map((r) => r.value), ['A', 'B']);
-  assert.equal(batchTemplate('prefix $input').variable, 'input');
-  assert.equal(batchTemplate('$a then $b'), null);
-  assert.throws(() => validateTask({ begin: { tier: 'tiny', batch: true, template: '$a and $b' } }), /batch/);
+  assert.equal(batchTemplate('prefix ${input}').variable, 'input');
+  assert.equal(batchTemplate('${a} then ${b}'), null);
+  assert.throws(() => validateTask({ begin: { tier: 'tiny', batch: true, template: '${a} and ${b}' } }), /batch/);
 });
 
 test('a text task is compiled to a reusable JSON declaration in the user home', async () => {
@@ -226,6 +226,9 @@ test('CLI tier refuses a model missing from the live catalog and an invalid tier
   const bin = path.resolve('bin/pworker.mjs');
   const cli = (...args) => exec(process.execPath, [bin, ...args], { env });
   try {
+    const remote = JSON.parse((await cli('models', '--provider', 'fake')).stdout);
+    assert.equal(remote[0].id, 'real-model');
+    assert.equal(remote[0].provider, 'fake');
     await assert.rejects(cli('tier', 'small', '--provider', 'fake', '--model', 'TYPO'), /not in the live catalog/);
     await assert.rejects(cli('tier', '--provider', 'fake', '--model', 'real-model'), /Usage: pworker tier/);
     assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')).tiers, undefined);

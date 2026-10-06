@@ -43,7 +43,7 @@ pworker models stop LOCAL_NAME</code></pre></div>
     </section>
     <section id="run">
       <h2>Run and queue tasks</h2>
-      <p><code>TASK</code> can be a <code>.json</code> phase-map file (or a static JSON <code>.mjs</code> declaration), a text request, or <code>-</code> to read a request from standard input. <code>--input</code> supplies the start-phase value. JSON objects become named task variables; other values become <code>$input</code>. A text request is compiled and cached as a task file.</p>
+      <p><code>TASK</code> can be a <code>.json</code> phase-map file (or a static JSON <code>.mjs</code> declaration), a text request, or <code>-</code> to read a request from standard input. <code>--input</code> supplies the start-phase value. JSON objects become named task variables; other values become <code>${input}</code>. A text request is compiled and cached as a task file.</p>
       <p>In the interactive CLI, open <strong>New task conversation</strong> to submit requests in a text-mode conversation. Every request begins in the background, and the request becomes that task's initial input, so you can submit another request while earlier work runs. Open <strong>Current tasks</strong> separately to inspect the ten newest saved tasks, their status, current phase, and results. The default working directory is where <code>pworker</code> was started; use <code>pworker DIRECTORY</code> or <code>pworker --cwd DIRECTORY</code> to open the menu for a different directory.</p>
       <div class="codebox"><div class="terminalhead">commands</div><pre><code>pworker run ./task.json --input '{"input":"hello"}'
 pworker run 'Summarize the supplied text' --input 'Meeting notes...'

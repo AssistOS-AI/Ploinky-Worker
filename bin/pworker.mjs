@@ -25,7 +25,7 @@ const configFile = path.join(home, 'config.json');
 const queueFile = path.join(home, 'queue.json');
 const option = (name, fallback = null) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1]; };
 const json = (v) => console.log(JSON.stringify(v, null, 2));
-const client = () => createPworkerClient({ purpose: 'pworker:cli', client: 'pworker' });
+const client = () => createPworkerClient({ purpose: option('purpose', 'pworker:cli'), client: 'pworker' });
 const sleep = (n) => new Promise((resolve) => setTimeout(resolve, n));
 
 // The persistent queue: every change happens under a lock folder, and a flush first renames the queue to a snapshot of its own, so
@@ -53,8 +53,8 @@ const takeQueue = () => withQueueLock(() => {
   fs.renameSync(queueFile, snapshot);
   return { entries: readQueue(snapshot), snapshot };
 });
-// Text that names a task file (an existing path, or a single word ending in .json/.mjs) is stored as an absolute path at queue time.
-const isTaskFile = (request) => /\.(mjs|json)$/.test(request) && (fs.existsSync(request) || !/\s/.test(request.trim()));
+// Text that names a task file (an existing path, or a single word ending in .json/.md/.markdown/.mjs) is stored as an absolute path at queue time.
+const isTaskFile = (request) => /\.(mjs|json|md|markdown)$/.test(request) && (fs.existsSync(request) || !/\s/.test(request.trim()));
 const KNOWN_COMMANDS = new Set(['help', 'status', 'serve', 'start', 'stop', 'stats', 'models', 'provider', 'tier', 'queue', 'run', 'flush', '_execute-batch']);
 
 // `pworker stats`: request metrics read from the request log of this home (no running proxy needed).
@@ -110,7 +110,7 @@ function startDetachedTasks(items) {
   fs.writeFileSync(manifest, JSON.stringify(jobs.map((job) => job.id)), { mode: 0o600 });
   const log = fs.openSync(path.join(home, 'logs', `batch-${batchId}.log`), 'a', 0o600);
   try {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_execute-batch', batchId], { cwd: process.cwd(), detached: true, stdio: ['ignore', log, log] });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '_execute-batch', batchId, '--purpose', option('purpose', 'pworker:cli')], { cwd: process.cwd(), detached: true, stdio: ['ignore', log, log] });
     if (!child.pid) throw new Error('Could not start the task process');
     for (const job of jobs) store.update(job.id, { pid: child.pid });
     child.unref();
@@ -148,6 +148,15 @@ function saveProvider(name, spec, key) {
   saveUserConfig(c);
   if (key) fs.writeFileSync(path.join(home, 'keys', spec.envFile ?? `${name}.env`), `${spec.keyVar}=${JSON.stringify(key)}\n`, { mode: 0o600 });
 }
+function saveModelLimits(model) {
+  if(!Number.isSafeInteger(model.contextLength)||!Number.isSafeInteger(model.maxOutputTokens)||model.contextLength<1||model.maxOutputTokens<1)return;
+  const config=JSON.parse(fs.readFileSync(configFile,'utf8'));
+  config.providers??={};const provider=config.providers[model.provider]??={};provider.modelLimits??={};
+  provider.modelLimits[model.id]={...model.modelLimits,contextTokens:model.contextLength,maxOutputTokens:model.maxOutputTokens,
+    source:model.modelLimits?.source??'provider model catalog',verifiedAt:model.modelLimits?.verifiedAt??new Date().toISOString().slice(0,10)};
+  fs.writeFileSync(configFile,JSON.stringify(config,null,2)+'\n',{mode:0o600});
+}
+
 function setTier(tier, entries, batch) {
   const c = readUserConfig();
   c.tiers ??= {};
@@ -279,6 +288,7 @@ async function configureTier(screen, preferred = null) {
   note(`${tier} priority order:\n${chainSummary(entries)}`);
   const confirmation = await selectMenu(screen, `Save ${tier}?`, [{ label: 'Save this tier mapping', value: 'save' }]);
   if (confirmation !== 'save') return;
+  saveModelLimits(selected);
   setTier(tier, entries);
   await restartProxy();
   note(`Saved ${tier} with ${entries.length} model${entries.length === 1 ? '' : 's'} in priority order.`);
@@ -381,9 +391,9 @@ async function composeTasks(screen, currentWorkingDirectory) {
   for (;;) {
     const task = await promptChat(screen, 'New task conversation', transcript);
     if (task == null) return;
-    const request = /\.(mjs|json)$/.test(task) && !path.isAbsolute(task) ? path.resolve(currentWorkingDirectory, task) : task;
+    const request = /\.(mjs|json|md|markdown)$/.test(task) && !path.isAbsolute(task) ? path.resolve(currentWorkingDirectory, task) : task;
     try {
-      const input = /\.(mjs|json)$/.test(request) ? '' : task;
+      const input = /\.(mjs|json|md|markdown)$/.test(request) ? '' : task;
       const job = startDetachedTasks([{ request, input, currentWorkingDirectory }])[0];
       transcript.push({ role: 'user', text: task });
       transcript.push({ role: 'pworker', text: `Task ${job.id.slice(0, 8)} started (${job.status}). Add another request or press Esc to return. Open Current tasks to monitor phases and results.` });
@@ -476,7 +486,17 @@ async function main() {
   if (command === 'stats' && !args.includes('--proxy')) { printStats(); return; }
   if (['run', '--async', 'queue', 'flush', 'stats', 'models', 'tier'].includes(command)) await startProxy();
   if (command === 'stats') { json(await client().stats()); return; }
-  if (command === 'models') { const action = args[1]; json(action === 'start' || action === 'stop' ? await client().model(args[2], action) : await client().models()); return; }
+  if (command === 'models') {
+    const action = args[1], provider = option('provider');
+    if (provider) json(await modelsFromProxy(provider));
+    else if (args.includes('--all')) {
+      const available = connectedProviders(loadLayers().config, await localStates());
+      const catalogs = await tierModelChoices(available);
+      json({ models: catalogs.catalogues.flatMap((entry) => entry.models), errors: catalogs.unavailable });
+      if (catalogs.unavailable.length) process.exitCode = 1;
+    } else json(action === 'start' || action === 'stop' ? await client().model(args[2], action) : await client().models());
+    return;
+  }
   if (command === 'provider') {
     const name = args[1], key = option('key', '');
     const prior = loadLayers().config.providers?.[name] ?? {};
@@ -499,6 +519,7 @@ async function main() {
     const existing = args.includes('--add') ? tierEntries(config, args[1]) : [];
     if (existing.some((entry) => entry.provider === name && entry.model === model)) throw new Error('That provider and model are already in the tier');
     const entries = [...existing, { provider: name, model }];
+    saveModelLimits(selected);
     setTier(args[1], entries, args.includes('--batch') ? true : undefined); await restartProxy();
     json({ tier: args[1], entries }); return;
   }
@@ -509,7 +530,7 @@ async function main() {
   }
   if (command === 'run' || command === '--async' || command === 'queue') {
     const request = args[1] === '-' ? fs.readFileSync(0, 'utf8') : args[1];
-    if (!request) throw new Error('Usage: pworker run <file.json|request|-> [--input text|JSON]');
+    if (!request) throw new Error('Usage: pworker run <file.json|file.md|request|-> [--input text|JSON]');
     let input = option('input', ''); try { input = JSON.parse(input); } catch {}
     const currentWorkingDirectory = option('cwd', option('current-working-directory', null));
     if (command === 'queue') {
@@ -552,6 +573,6 @@ async function main() {
     if (failed.length || results.some((r) => !r.ok)) process.exitCode = 1;
     return;
   }
-  console.log('pworker [run <task.json|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats [--since 1h|24h|7d] [--provider P] [--by hour|day] [--json] [--proxy] | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
+  console.log('pworker [run <task.json|task.md|request|-> --input text|JSON [--cwd DIR] [--async]] | --status [TASK_ID] | queue <task> --input ... [--cwd DIR] | queue list|clear | flush [--async] | start | stop | serve | stats [--since 1h|24h|7d] [--provider P] [--by hour|day] [--json] [--proxy] | models [start|stop <local>] | provider <name> --endpoint URL --key KEY --rpm N | tier <name> --provider P --model ID [--batch]');
 }
 main().catch((e) => { console.error(e.message); process.exitCode = 1; });

@@ -126,6 +126,15 @@
         "max": 4,
         "baseMs": 1000,
         "maxWaitMs": 60000
+      },
+      "modelLimits": {
+        "deepseek-flash": {
+          "contextTokens": 1000000,
+          "maxOutputTokens": 393216,
+          "defaultOutputTokens": 65536,
+          "source": "https://api-docs.deepseek.com/api/create-chat-completion/",
+          "verifiedAt": "2026-10-06"
+        }
       }
     },
     "local": {

@@ -18,11 +18,11 @@
     </section>
     <section id="rules">
       <h2>When batching is allowed</h2>
-      <p>Both the tier and the phase must opt in. The phase template must contain exactly one <code>$variable</code>, at its very end. This lets Ploinky Workers send the prompt prefix once, then append different inputs without duplicating the instruction.</p>
+      <p>Both the tier and the phase must opt in. The phase template must contain exactly one <code>${variable}</code>, at its very end. This lets Ploinky Workers send the prompt prefix once, then append different inputs without duplicating the instruction.</p>
       <div class="codebox"><div class="terminalhead">eligible phase</div><pre><code>{
   "begin": {
     "tier": "small",
-    "template": "Classify this text: $input",
+    "template": "Classify this text: ${input}",
     "batch": true,
     "code": "this.end(result)"
   }

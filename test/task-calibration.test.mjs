@@ -10,20 +10,20 @@ test('statement code may contain arrow callbacks', async()=>{
 test('different request budgets do not share a batch and request options reach client', async()=>{
   const calls=[];
   const w=new Pworker({client:{chat:async o=>{calls.push(o);return {ok:true,text:'ok'};}},config:{batching:{small:{enabled:true}}}});
-  for(const maxTokens of [100,200]) w.enqueue({begin:{tier:'small',template:'Task $input',batch:true,request:{maxTokens,cache:'off',retryCut:false},code:'this.end(result)'}},'a');
+  for(const maxTokens of [100,200]) w.enqueue({begin:{tier:'small',template:'Task ${input}',batch:true,request:{maxTokens,cache:'off',retryCut:false},code:'this.end(result)'}},'a');
   assert.ok((await w.flush()).every(r=>r.ok)); assert.deepEqual(calls.map(c=>c.maxTokens).sort(),[100,200]); assert.ok(calls.every(c=>c.cache==='off' && !c.retryCut));
 });
 test('extra batch IDs fail closed: nothing of that answer is delivered, the batch is split into single requests',async()=>{
   const singles=[];
   const w=new Pworker({client:{json:async()=>({ok:true,json:{results:{a:'a',b:'b',extra:'bad'}}}),chat:async o=>{singles.push(o.prompt);return {ok:true,text:o.prompt.toUpperCase()};}},config:{batching:{small:{enabled:true}}}});
-  const t={begin:{tier:'small',template:'Task $input',batch:true}};
+  const t={begin:{tier:'small',template:'Task ${input}',batch:true}};
   w.enqueue(t,'a',{id:'a'});w.enqueue(t,'b',{id:'b'});
   assert.deepEqual((await w.flush()).map(r=>r.value),['TASK A','TASK B']);
   assert.deepEqual(singles.sort(),['Task a','Task b']);
 });
 test('a truncated but parseable response cannot become a successful task',async()=>{
   const w=new Pworker({client:{chat:async()=>({ok:true,text:'pos_likes(ada,tea).',cut:true})}});
-  w.enqueue({begin:{tier:'small',template:'$input',request:{retryCut:false}}},'source');
+  w.enqueue({begin:{tier:'small',template:'${input}',request:{retryCut:false}}},'source');
   assert.match((await w.flush())[0].error,/truncated/);
   assert.throws(()=>validateTask({begin:{tier:'small',request:{maxTokens:-1}}}),/positive integer/);
 });

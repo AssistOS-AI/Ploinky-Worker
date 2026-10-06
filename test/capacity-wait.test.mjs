@@ -10,7 +10,7 @@ import {Pworker} from '../lib/pworker/task.mjs';
 
 const answer=()=>Response.json({choices:[{message:{content:'ready'},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:1}});
 const configFor=root=>({taskHome:root,dataDir:path.join(root,'data'),defaultUpstream:'stub',upstreams:{stub:{baseUrl:'http://stub.local',noKey:true,limits:{maxConcurrent:1},retry:{max:0,max5xx:0,baseMs:1,maxWaitMs:1}}},tiers:{small:[{upstream:'stub',model:'m'}]}});
-const task={begin:{tier:null,code:'await this.writeFile("marker.txt",this.input);this.next("model")'},model:{tier:'small',template:'$input',request:{timeoutMs:20,retryCut:false},code:'this.end(result)'}};
+const task={begin:{tier:null,code:'await this.writeFile("marker.txt",this.input);this.next("model")'},model:{tier:'small',template:'${input}',request:{timeoutMs:20,retryCut:false},code:'this.end(result)'}};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,5));
 
 test('429 waits beyond retry count and model deadline, then completes the same task',async()=>{
@@ -73,12 +73,12 @@ test('a finished task publishes its result while a different task still waits',a
 });
 
 test('cancelling one batched task does not cancel or execute the wrong task',async()=>{
-  let release,signal;const events=[];
-  const worker=new Pworker({config:{batching:{small:{enabled:true}}},onProgress:e=>events.push(e),client:{json:o=>{signal=o.signal;return new Promise(resolve=>{release=resolve;});}}});
-  const t={begin:{tier:'small',template:'Task $input',batch:true,code:'this.end(result)'}};
+  let release,signal,requests;const events=[];
+  const worker=new Pworker({config:{batching:{small:{enabled:true}}},onProgress:e=>events.push(e),client:{json:o=>{signal=o.signal;requests=JSON.parse(o.prompt.slice(o.prompt.lastIndexOf('\n')+1));return new Promise(resolve=>{release=resolve;});}}});
+  const t={begin:{tier:'small',template:'Task ${input}',batch:true,code:'this.end(result)'}};
   worker.enqueue(t,'a',{id:'a'});worker.enqueue(t,'b',{id:'b'});const run=worker.flush();
   assert.equal(worker.cancel('a'),true);assert.equal(signal.aborted,false);
-  release({ok:true,json:{results:{a:'ignored',b:'kept'}}});
+  release({ok:true,json:{results:Object.fromEntries(requests.map(r=>[r.id,r.input==='a'?'ignored':'kept']))}});
   const results=await run;assert.equal(results.find(r=>r.id==='a').ok,false);assert.equal(results.find(r=>r.id==='b').value,'kept');
   assert.equal(events.filter(e=>e.id==='a'&&e.status==='cancelled').length,1);
 });
